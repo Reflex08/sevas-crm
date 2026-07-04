@@ -289,6 +289,7 @@
     </nav>
     <div class="helper-status" id="helper-status"><span class="led"></span><span id="helper-text">Auto-text: off</span></div>
     <div class="helper-status" id="backup-chip" title="Automatic backup status"><span class="led"></span><span id="backup-text">Auto-backup: off</span></div>
+    <div class="helper-status" id="sync-chip" title="Cloud sync between your PC and phone"><span class="led"></span><span id="sync-text">Cloud sync: off</span></div>
     <div style="height:12px"></div>
   </aside>
 
@@ -490,7 +491,7 @@ function normalize(r){
   if(!r.seqJ) r.seqJ=Math.max(0,...r.jobs.map(j=>j.id||0))+1;
   return r;
 }
-function save(){localStorage.setItem(KEY,JSON.stringify(db));scheduleBackup();}
+function save(){db.updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(db));scheduleBackup();scheduleSync();}
 function seed(){
   // Start clean — real data comes from the owner auto-import + your own entries.
   return normalize({customers:[],jobs:[],settings:DEFAULT_SETTINGS(),seqC:1,seqJ:1});
@@ -1016,6 +1017,15 @@ function renderSettings(){
          <button class="btn" id="set-recheck">Re-check connection</button>
          <div class="hint" style="margin-top:10px">Free click-to-text always works without this — it opens your messaging app pre-filled.</div>
        </div></div>
+       <div class="panel"><h2>🔄 Cloud sync (PC ⇄ phone)</h2><div class="panel-pad">
+         <div class="note" style="margin-bottom:12px"><b>Status:</b> <span id="sync-state">…</span><br>
+           Keeps your PC and phone on the same data automatically — every change uploads to a
+           <b>private</b> GitHub Gist on your account; each device pulls the newest copy when opened.<br><br>
+           <b>One-time setup (do on BOTH devices):</b> open
+           <b>github.com/settings/tokens/new?scopes=gist&amp;description=Sevas-CRM-Sync</b> →
+           Generate token → copy it → paste below. The token stays on the device only — never in backups.</div>
+         <div class="field"><label>GitHub token</label><input id="sync-key" type="password" placeholder="ghp_…"></div>
+       </div></div>
        <div class="panel"><h2>✨ AI Quick add</h2><div class="panel-pad">
          <div class="note" style="margin-bottom:12px">The <b>✨ Quick add</b> button (top bar) turns pasted text into leads for free.
            Reading <b>screenshots</b> uses Claude vision and needs your Anthropic API key
@@ -1048,6 +1058,12 @@ function renderSettings(){
   $("#set-url").onchange=e=>{s.helperUrl=e.target.value.trim().replace(/\/+$/,"");save();checkHelper();};
   $("#set-recheck").onclick=()=>{checkHelper();toast("Re-checking…");};
   paintHelperSetting();
+  // cloud sync
+  $("#sync-key").value=syncToken();
+  $("#sync-key").onchange=e=>{const v=e.target.value.trim();
+    if(!v){localStorage.removeItem(SYNC_KEY);localStorage.removeItem(SYNC_GIST);syncState="off";paintSyncChip();toast("Cloud sync turned off","ok");return;}
+    toast("Connecting to GitHub…");syncConnect(v);};
+  paintSyncCard();
   // AI key
   $("#ai-key").value=localStorage.getItem(AI_KEY)||"";
   $("#ai-key").onchange=e=>{const v=e.target.value.trim();
@@ -1584,6 +1600,100 @@ $("#backup-chip").onclick=()=>{
   else backupDownload();
 };
 
+/* ---------------- Cloud sync (private GitHub Gist — PC ⇄ phone) ---------------- */
+const SYNC_KEY="servicepro.synckey",SYNC_GIST="servicepro.syncgist",SYNC_LAST="servicepro.synclast",GIST_FILE="servicepro-db.json";
+let syncState="off",syncBusy=false,syncTimer=null; // off|ok|err
+function syncToken(){return localStorage.getItem(SYNC_KEY)||"";}
+async function gh(method,url,body){
+  const res=await fetch("https://api.github.com"+url,{method,
+    headers:{"Authorization":"Bearer "+syncToken(),"Accept":"application/vnd.github+json","Content-Type":"application/json"},
+    body:body?JSON.stringify(body):undefined});
+  if(!res.ok)throw new Error("GitHub "+res.status+(res.status===401?" — check the token":""));
+  return res.json();
+}
+async function syncFindGist(){
+  let id=localStorage.getItem(SYNC_GIST);
+  if(id)return id;
+  const list=await gh("GET","/gists?per_page=100");
+  const hit=list.find(g=>g.files&&g.files[GIST_FILE]);
+  if(hit){localStorage.setItem(SYNC_GIST,hit.id);return hit.id;}
+  return null;
+}
+async function syncFetchRemote(id){
+  const g=await gh("GET","/gists/"+id);
+  const f=g.files&&g.files[GIST_FILE]; if(!f)return null;
+  let text=f.content;
+  if(f.truncated){const r=await fetch(f.raw_url);text=await r.text();}
+  const remote=JSON.parse(text);
+  return (remote&&Array.isArray(remote.customers))?remote:null;
+}
+/* On load / app-foreground: adopt the cloud copy if it's newer than this device's. */
+async function syncPull(){
+  if(!syncToken())return false;
+  try{
+    const id=await syncFindGist();
+    if(!id){syncState="ok";paintSyncChip();return false;}
+    const remote=await syncFetchRemote(id);
+    syncState="ok";
+    if(remote&&(remote.updatedAt||0)>(db.updatedAt||0)){
+      db=normalize(remote);
+      localStorage.setItem(KEY,JSON.stringify(db)); // direct write — save() would push right back
+      render();toast("🔄 Synced from your other device ✓","ok");
+    }
+    paintSyncChip();return true;
+  }catch(e){syncState="err";paintSyncChip();return false;}
+}
+async function syncPush(){
+  if(!syncToken()||syncBusy)return;
+  syncBusy=true;
+  try{
+    const id=await syncFindGist();
+    const payload={description:"Seva's Services CRM — synced data (auto-managed, don't edit)",public:false,
+      files:{[GIST_FILE]:{content:JSON.stringify(db)}}};
+    if(id)await gh("PATCH","/gists/"+id,payload);
+    else{const g=await gh("POST","/gists",payload);localStorage.setItem(SYNC_GIST,g.id);}
+    syncState="ok";localStorage.setItem(SYNC_LAST,String(Date.now()));
+  }catch(e){syncState="err";}
+  syncBusy=false;paintSyncChip();
+}
+function scheduleSync(){if(!syncToken())return;clearTimeout(syncTimer);syncTimer=setTimeout(syncPush,4000);}
+function paintSyncChip(){
+  const el=$("#sync-chip");if(!el)return;const t=$("#sync-text");
+  el.className="helper-status "+(syncState==="ok"?"on":"");el.style.cursor="pointer";
+  const led=el.querySelector(".led");if(led)led.style.background=syncState==="err"?"#fbbf24":"";
+  if(!syncToken())t.textContent="Cloud sync: off — Settings";
+  else if(syncState==="err")t.textContent="⚠ Sync error — click to retry";
+  else{const ts=+localStorage.getItem(SYNC_LAST)||0;t.textContent="🔄 Synced · "+(ts?relTime(ts):"just set up");}
+  if(typeof paintSyncCard==="function")paintSyncCard();
+}
+function paintSyncCard(){
+  const st=$("#sync-state");if(!st)return;
+  if(!syncToken())st.textContent="off — paste your GitHub token below (one-time, both devices)";
+  else if(syncState==="err")st.textContent="⚠ error — check the token and click the sidebar chip to retry";
+  else st.textContent="ON — this device pushes every change and pulls on open ✓";
+}
+/* Pairing: entering the token on a device decides pull-vs-push explicitly (never clobbers blindly). */
+async function syncConnect(token){
+  localStorage.setItem(SYNC_KEY,token);
+  try{
+    const id=await syncFindGist();
+    if(id){
+      const remote=await syncFetchRemote(id);
+      if(remote&&confirm(`Cloud data found: ${remote.customers.length} customers, ${remote.jobs.length} jobs.\n\nOK = load the CLOUD data onto THIS device (normal for a new phone).\nCancel = overwrite the cloud with THIS device's data.`)){
+        db=normalize(remote);db.updatedAt=Date.now();
+        localStorage.setItem(KEY,JSON.stringify(db));render();toast("🔄 Cloud data loaded onto this device ✓","ok");
+      }else{await syncPush();toast("🔄 Cloud updated from this device ✓","ok");}
+    }else{await syncPush();toast("🔄 Sync is on — this device seeded the cloud ✓","ok");}
+    syncState="ok";
+  }catch(e){syncState="err";toast("Sync setup failed: "+e.message,"err");}
+  paintSyncChip();if(view==="settings")renderSettings();
+}
+$("#sync-chip").onclick=()=>{
+  if(!syncToken()){view="settings";render();}
+  else syncPull().then(()=>syncPush());
+};
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncPull();}); // phone: pull when the app comes to the foreground
+
 /* ---------------- Paste import ---------------- */
 const PASTE_SAMPLE="Jane;12 Maple Ave;+1 (555) 123-4567;275$;29th june;;";
 /* Real client data the owner sent me — auto-loaded once (done + paid).
@@ -1909,6 +2019,7 @@ if(__earn)setTimeout(()=>toast(`📥 Earnings synced: ${__earn.added} jobs added
 if(__cont)setTimeout(()=>toast(`📇 Contacts synced: ${__cont.attached} phones attached, ${__cont.created} added, ${__cont.dup} already in CRM${__cont.skipped.length?`, ${__cont.skipped.length} ambiguous (noted)`:""}`,"ok"),1900);
 checkHelper();setInterval(checkHelper,8000);
 initAutoBackup();setInterval(paintBackupChip,60000);
+syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
 
 if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw.js");
 </script>
