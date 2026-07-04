@@ -84,6 +84,13 @@
   .btn-ghost{background:transparent;border-color:transparent;color:var(--muted)}
   .btn-ghost:hover{background:var(--gray-soft);color:var(--ink)}
 
+  /* ---------- Hero greeting ---------- */
+  .hero-card{background:linear-gradient(135deg,rgba(42,184,232,.10),rgba(245,166,35,.07)),var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:18px;box-shadow:var(--shadow)}
+  .hero-card .hg{font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
+  .hero-card .hline{font-family:Georgia,"Times New Roman",serif;font-size:21px;line-height:1.4;color:var(--ink)}
+  .hero-card .hline b{color:var(--gold);font-weight:700}
+
   /* ---------- Stat cards ---------- */
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:14px;margin-bottom:22px}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
@@ -265,8 +272,8 @@
     .search{order:5;flex-basis:100%;max-width:none}
     .panel{overflow-x:auto}
     input,select,textarea{font-size:16px} /* 16px stops iOS zoom-on-focus */
-    .overlay{padding:14px 8px}
-    .modal-body{max-height:76vh}
+    .overlay{padding:calc(env(safe-area-inset-top) + 52px) 8px 24px} /* modals sit lower — clear of the notch & easy to reach */
+    .modal-body{max-height:70vh}
     .jobcard{flex-wrap:wrap}
     .jobcard .actions{max-width:none}
   }
@@ -684,6 +691,31 @@ function render(){
 function todayLong(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
 
 /* ---- Dashboard ---- */
+/* Rotating personal stat greeting — different line every visit. */
+function heroCard(){
+  const ym=today().slice(0,7),mon=new Date().toLocaleDateString(undefined,{month:"long"});
+  const inMon=db.jobs.filter(j=>j.status!=="cancelled"&&(j.date||"").slice(0,7)===ym);
+  const monthCollected=inMon.reduce((s,j)=>s+(+j.collected||0),0);
+  const monthJobs=inMon.filter(j=>j.status==="completed").length;
+  const allTime=db.jobs.filter(j=>j.status!=="cancelled").reduce((s,j)=>s+(+j.collected||0),0);
+  const out=totalOutstanding();
+  const byDay={};inMon.forEach(j=>{if(j.date)byDay[j.date]=(byDay[j.date]||0)+(+j.collected||0);});
+  const bestDay=Math.max(0,...Object.values(byDay));
+  const name=firstName(db.settings.business.name||"").replace(/'s$/i,"")||"boss";
+  const opts=[];
+  if(monthCollected>0){
+    opts.push(`In ${mon}, you've collected <b>${money(monthCollected)}</b>. Keep it up, ${name}! 💪`);
+    opts.push(`<b>${money(monthCollected)}</b> in the books for ${mon} — momentum, ${name}. 🚀`);}
+  if(monthJobs>0)opts.push(`<b>${monthJobs} job${monthJobs>1?"s":""}</b> finished in ${mon}. The grind pays, ${name}. 🔥`);
+  if(bestDay>0)opts.push(`Best day this month: <b>${money(bestDay)}</b>. Let's beat it, ${name}. ⚡`);
+  if(allTime>0)opts.push(`<b>${money(allTime)}</b> collected all-time. Empire in progress, ${name}. 🏆`);
+  if(out>0)opts.push(`<b>${money(out)}</b> is still out there — go get it, ${name}. 🎯`);
+  if(!opts.length)opts.push(`Fresh page today — let's make it count, ${name}. ☀️`);
+  const h=new Date().getHours();
+  const greet=h<12?"Good morning":h<17?"Good afternoon":"Good evening";
+  return `<div class="hero-card"><div class="hg">${greet}, ${esc(name)}</div>
+    <div class="hline">${opts[Math.floor(Math.random()*opts.length)]}</div></div>`;
+}
 function renderDashboard(){
   const t=today();
   const todays=db.jobs.filter(j=>j.status==="scheduled"&&j.date===t).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
@@ -698,24 +730,23 @@ function renderDashboard(){
   const overdue=db.jobs.filter(j=>j.status==="scheduled"&&j.date<t);
 
   $("#content").innerHTML=`
+   ${heroCard()}
+   ${dashRevenuePanel()}
+   <div class="panel" style="margin-bottom:18px">
+     <h2>📋 Today's schedule <span class="pill">${todays.length}</span><span class="spacer"></span>
+       ${todays.filter(j=>custById(j.customerId)&&custById(j.customerId).phone).length?`<button class="btn sm btn-green" id="remind-today">💬 Text reminders</button>`:""}</h2>
+     ${overdue.length?`<div style="padding:12px 18px 0"><div class="agenda-head overdue">⚠ ${overdue.length} overdue job${overdue.length!==1?"s":""} not marked done <span class="spacer"></span></div></div>`:""}
+     <div class="panel-pad" id="today-list"></div>
+   </div>
    <div class="stats">
      <div class="stat link" data-nav="schedule"><div class="ic blue">🗓️</div><div class="label">Jobs today</div><div class="num">${todays.length}</div><div class="meta">${weekJobs.length} this week</div></div>
      <div class="stat link" data-nav="money"><div class="ic green">💵</div><div class="label">Collected (${new Date().toLocaleDateString(undefined,{month:"short"})})</div><div class="num">${money(collected)}</div><div class="meta">this month</div></div>
      <div class="stat link" data-nav="money"><div class="ic red">⏳</div><div class="label">Outstanding</div><div class="num">${money(outstanding)}</div><div class="meta">${unpaid.length} unpaid job${unpaid.length!==1?"s":""}</div></div>
      <div class="stat link" data-nav="customers"><div class="ic amber">⏰</div><div class="label">Follow-ups due</div><div class="num">${dueFollow.length}</div><div class="meta">${leads.length?leads.length+" open lead"+(leads.length!==1?"s":""):"all clear"}</div></div>
    </div>
-   ${dashRevenuePanel()}
    <div class="grid-2">
-     <div class="panel">
-       <h2>📋 Today's schedule <span class="pill">${todays.length}</span><span class="spacer"></span>
-         ${todays.filter(j=>custById(j.customerId)&&custById(j.customerId).phone).length?`<button class="btn sm btn-green" id="remind-today">💬 Text reminders</button>`:""}</h2>
-       ${overdue.length?`<div style="padding:12px 18px 0"><div class="agenda-head overdue">⚠ ${overdue.length} overdue job${overdue.length!==1?"s":""} not marked done <span class="spacer"></span></div></div>`:""}
-       <div class="panel-pad" id="today-list"></div>
-     </div>
-     <div class="col">
-       <div class="panel"><h2>🌱 Needs follow-up <span class="pill">${dueFollow.length+leads.filter(c=>!c.followup).length}</span></h2><div class="panel-pad" id="follow-list"></div></div>
-       <div class="panel"><h2>💳 Money to collect <span class="pill">${unpaid.length}</span></h2><div class="panel-pad" id="unpaid-list"></div></div>
-     </div>
+     <div class="panel"><h2>🌱 Needs follow-up <span class="pill">${dueFollow.length+leads.filter(c=>!c.followup).length}</span></h2><div class="panel-pad" id="follow-list"></div></div>
+     <div class="panel"><h2>💳 Money to collect <span class="pill">${unpaid.length}</span></h2><div class="panel-pad" id="unpaid-list"></div></div>
    </div>`;
 
   $("#today-list").innerHTML = (overdue.concat(todays)).length
