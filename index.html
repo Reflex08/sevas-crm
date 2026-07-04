@@ -240,12 +240,9 @@
   .toast.err{background:#7f1d1d} .toast.ok{background:#0c633a}
 
   /* ---------- Charts ---------- */
-  .ctrack{fill:rgba(148,210,255,.045)}
-  .cbar,.adot{transition:filter .13s}
-  .bcol,.acol{cursor:default}
-  .bcol:hover .ctrack{fill:rgba(148,210,255,.1)}
-  .bcol:hover .cbar{filter:brightness(1.1) drop-shadow(0 3px 7px rgba(42,184,232,.4))}
-  .acol:hover .adot{filter:brightness(1.15) drop-shadow(0 2px 6px rgba(42,184,232,.5))}
+  .adot{transition:filter .13s,r .13s}
+  .acol{cursor:default}
+  .acol:hover .adot{filter:brightness(1.2) drop-shadow(0 2px 7px rgba(42,184,232,.6))}
   .chart-tip{position:fixed;z-index:150;background:#102c49;border:1px solid var(--line);border-radius:10px;
     padding:8px 12px;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .12s,transform .12s;
     box-shadow:var(--shadow-lg);white-space:nowrap;line-height:1.35}
@@ -506,8 +503,7 @@ function uiSet(p){localStorage.setItem("servicepro.ui",JSON.stringify(Object.ass
 
 /* ---------------- State ---------------- */
 let view="dashboard",query="",custFilter="all",custSort="name-asc",schedFilter="upcoming",moneyPeriod="month";
-let dashRevPeriod=uiPref().revPeriod||"month",dashRevChart=uiPref().revChart||"bars";
-if(dashRevChart==="line")dashRevChart="bars"; // the line style was retired — fall back to bars
+let dashRevPeriod=uiPref().revPeriod||"month"; // chart style: smooth area, everywhere (bars/line retired)
 let editCust=null,editJob=null,draftLog=[],smsCtx=null,smsMode="app",bulkList=[],bulkCtxJob=false,helperOnline=false;
 
 /* ---------------- Utils ---------------- */
@@ -577,57 +573,46 @@ function svgWrap(g,inner,defs){
   return `<svg viewBox="0 0 ${g.W} ${g.H}" width="100%" height="${g.H}" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%">
     ${defs||""}${g.grid}${inner}</svg>`;
 }
-/* Column with a rounded cap and a square baseline (anchored, never a floating pill). */
-function topRoundRect(x,y,w,h,r){r=Math.max(0,Math.min(r,w/2,h));
-  return `M${x.toFixed(1)} ${(y+h).toFixed(1)} L${x.toFixed(1)} ${(y+r).toFixed(1)} Q${x.toFixed(1)} ${y.toFixed(1)} ${(x+r).toFixed(1)} ${y.toFixed(1)} L${(x+w-r).toFixed(1)} ${y.toFixed(1)} Q${(x+w).toFixed(1)} ${y.toFixed(1)} ${(x+w).toFixed(1)} ${(y+r).toFixed(1)} L${(x+w).toFixed(1)} ${(y+h).toFixed(1)} Z`;}
-/* Pure-SVG column chart — dataviz mark spec: thin capped columns, rounded cap + square
-   baseline, a faint track per slot, one baseline rule, labels only on the peak + latest. */
-function barChartSVG(data,height){
-  height=height||230; const g=chartGeo(data,height); const gap=g.cw/g.n;
-  const bw=Math.min(30,Math.max(6,gap*0.46)), r=Math.min(6,bw/2), base=g.padT+g.ch;
-  const cols=data.map((d,i)=>{
-    const cx=g.padL+gap*i+gap/2, x=cx-bw/2;
-    const bh=d.value>0?Math.max(3,g.ch*(d.value/g.niceMax)):0, y=base-bh;
-    const track=`<rect x="${x.toFixed(1)}" y="${g.padT.toFixed(1)}" width="${bw.toFixed(1)}" height="${g.ch.toFixed(1)}" rx="${r}" class="ctrack"/>`;
-    const bar=bh>0?`<path class="cbar" d="${topRoundRect(x,y,bw,bh,r)}" fill="url(#bargrad)"/>`:"";
-    const cap=bh>0?`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.min(bh,r+2).toFixed(1)}" rx="${r}" fill="rgba(207,250,254,.35)"/>`:"";
-    const lbl=(d.value>0&&(d.value===g.maxV||i===g.n-1))?`<text x="${cx.toFixed(1)}" y="${(y-9).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" fill="#f2f9ff">${moneyShort(d.value)}</text>`:"";
-    const xlbl=g.showLbl(i)?`<text x="${cx.toFixed(1)}" y="${(g.H-8).toFixed(1)}" text-anchor="middle" font-size="10.5" fill="#7ea3c0" font-weight="600">${esc(d.label)}</text>`:"";
-    const hit=`<rect x="${(cx-gap/2).toFixed(1)}" y="${g.padT.toFixed(1)}" width="${gap.toFixed(1)}" height="${(g.ch+6).toFixed(1)}" fill="transparent"/>`;
-    return `<g class="bcol" data-lbl="${esc(d.label)+(d.year?(" "+d.year):"")}" data-val="${esc(money(d.value))}">${track}${bar}${cap}${lbl}${xlbl}${hit}</g>`;
-  }).join("");
-  const baseline=`<line x1="${g.padL}" y1="${base.toFixed(1)}" x2="${(g.W-g.padR).toFixed(1)}" y2="${base.toFixed(1)}" stroke="rgba(148,210,255,.3)" stroke-width="1.25"/>`;
-  const defs=`<defs><linearGradient id="bargrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5cd4f5"/><stop offset=".5" stop-color="#2ab8e8"/><stop offset="1" stop-color="#1778b8"/></linearGradient></defs>`;
-  return svgWrap(g,cols+baseline,defs);
+/* Smooth cubic path through points (Catmull-Rom → bezier), clamped to the plot area. */
+function smoothPath(pts,yMin,yMax){
+  if(pts.length<3)return pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+  const cl=y=>Math.max(yMin,Math.min(yMax,y));
+  let d="M"+pts[0][0].toFixed(1)+" "+pts[0][1].toFixed(1);
+  for(let i=0;i<pts.length-1;i++){
+    const p0=pts[Math.max(0,i-1)],p1=pts[i],p2=pts[i+1],p3=pts[Math.min(pts.length-1,i+2)];
+    d+=`C${(p1[0]+(p2[0]-p0[0])/6).toFixed(1)} ${cl(p1[1]+(p2[1]-p0[1])/6).toFixed(1)} ${(p2[0]-(p3[0]-p1[0])/6).toFixed(1)} ${cl(p2[1]-(p3[1]-p1[1])/6).toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
 }
-/* Pure-SVG area chart (filled). Line-only variant retired — bars + area only. */
-function lineChartSVG(data,height,fill){
+/* The revenue chart — one style everywhere: a smooth filled area. */
+function areaChartSVG(data,height){
   height=height||230; const g=chartGeo(data,height); const base=g.padT+g.ch;
   const X=i=>g.n<=1?g.padL+g.cw/2:g.padL+g.cw*i/(g.n-1), Y=v=>g.padT+g.ch-g.ch*(v/g.niceMax);
   const pts=data.map((d,i)=>[X(i),Y(d.value)]);
-  const path=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
-  const area=fill?`<path d="${path} L ${pts[pts.length-1][0].toFixed(1)} ${base.toFixed(1)} L ${pts[0][0].toFixed(1)} ${base.toFixed(1)} Z" fill="url(#areagrad)" stroke="none"/>`:"";
-  const line=`<path d="${path}" fill="none" stroke="#2ab8e8" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const path=smoothPath(pts,g.padT,base);
+  const area=`<path d="${path} L ${pts[pts.length-1][0].toFixed(1)} ${base.toFixed(1)} L ${pts[0][0].toFixed(1)} ${base.toFixed(1)} Z" fill="url(#areagrad)" stroke="none"/>`;
+  const glow=`<path d="${path}" fill="none" stroke="rgba(92,212,245,.35)" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const line=`<path d="${path}" fill="none" stroke="url(#linegrad)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
   const baseline=`<line x1="${g.padL}" y1="${base.toFixed(1)}" x2="${(g.W-g.padR).toFixed(1)}" y2="${base.toFixed(1)}" stroke="rgba(148,210,255,.3)" stroke-width="1.25"/>`;
   let cols="",labels="";
   data.forEach((d,i)=>{const[x,y]=pts[i];
-    if(d.value>0&&(i===data.length-1||d.value===g.maxV))labels+=`<text x="${x.toFixed(1)}" y="${(y-11).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" fill="#f2f9ff">${moneyShort(d.value)}</text>`;
+    if(d.value>0&&(i===data.length-1||d.value===g.maxV))labels+=`<text x="${x.toFixed(1)}" y="${(y-12).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" fill="#f2f9ff">${moneyShort(d.value)}</text>`;
     if(g.showLbl(i))labels+=`<text x="${x.toFixed(1)}" y="${g.H-8}" text-anchor="middle" font-size="10.5" fill="#7ea3c0" font-weight="600">${esc(d.label)}</text>`;
     const gap=g.cw/Math.max(1,g.n);
     cols+=`<g class="acol" data-lbl="${esc(d.label)+(d.year?(" "+d.year):"")}" data-val="${esc(money(d.value))}">
       <rect x="${(x-gap/2).toFixed(1)}" y="${g.padT.toFixed(1)}" width="${gap.toFixed(1)}" height="${(g.ch+6).toFixed(1)}" fill="transparent"/>
-      <circle class="adot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="#0e2d4f" stroke="#2ab8e8" stroke-width="2.5"/></g>`;});
-  const defs=`<defs><linearGradient id="areagrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(42,184,232,.32)"/><stop offset="1" stop-color="rgba(42,184,232,0)"/></linearGradient></defs>`;
-  return svgWrap(g,area+line+baseline+labels+cols,defs);
+      <circle class="adot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="#0e2d4f" stroke="#2ab8e8" stroke-width="2.5"/></g>`;});
+  const defs=`<defs>
+    <linearGradient id="areagrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(42,184,232,.42)"/><stop offset=".7" stop-color="rgba(42,184,232,.08)"/><stop offset="1" stop-color="rgba(42,184,232,0)"/></linearGradient>
+    <linearGradient id="linegrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1778b8"/><stop offset=".5" stop-color="#2ab8e8"/><stop offset="1" stop-color="#5cd4f5"/></linearGradient>
+  </defs>`;
+  return svgWrap(g,area+glow+line+baseline+labels+cols,defs);
 }
-function revChartSVG(data,type,height){
-  if(type==="area")return lineChartSVG(data,height,true);
-  return barChartSVG(data,height);
-}
+function revChartSVG(data,type,height){return areaChartSVG(data,height);}
 /* Hover tooltip shared by column + area charts. Re-bound after each chart render. */
 function bindChartTips(){
   const tip=$("#chart-tip"); if(!tip)return;
-  document.querySelectorAll(".bcol,.acol").forEach(el=>{
+  document.querySelectorAll(".acol").forEach(el=>{
     el.addEventListener("mouseenter",()=>{tip.innerHTML=`<div class="tl">${esc(el.dataset.lbl||"")}</div><div class="tv">${esc(el.dataset.val||"")}</div>`;tip.classList.add("show");});
     el.addEventListener("mousemove",e=>{const w=innerWidth,x=e.clientX;
       tip.style.left=(x>w-160?x-14-tip.offsetWidth:x+14)+"px";tip.style.top=(e.clientY-12)+"px";});
@@ -658,24 +643,21 @@ function revenueSeries(period){
 function dashRevenuePanel(){
   const {series,total,title}=revenueSeries(dashRevPeriod);
   const periods=[["week","Week"],["month","Month"],["quarter","Quarter"],["year","Year"],["all","All time"]];
-  const charts=[["bars","▦ Bars"],["area","△ Area"]];
   const hasData=series.some(d=>d.value>0);
-  const body=hasData?revChartSVG(series,dashRevChart,184)
+  const body=hasData?areaChartSVG(series,184)
     :`<div class="empty" style="padding:28px"><div class="big">📊</div>No revenue in this range yet.</div>`;
   return `<div class="panel" style="margin-bottom:18px" id="dash-rev">
     <h2>📈 ${esc(title)}<span class="spacer"></span><span class="money pos" style="font-size:15px">${money(total)}</span></h2>
     <div class="panel-pad" style="padding:12px 16px 8px">
       <div class="toolbar" style="margin-bottom:12px">
         <div class="seg">${periods.map(([v,l])=>`<button data-rp="${v}" class="${dashRevPeriod===v?"active":""}">${l}</button>`).join("")}</div>
-        <span class="spacer"></span>
-        <div class="seg">${charts.map(([v,l])=>`<button data-rc="${v}" class="${dashRevChart===v?"active":""}">${l}</button>`).join("")}</div>
       </div>
       ${body}
     </div></div>`;
 }
 function revenuePanel(months,height,title){
   const rev=revenueByMonth(months),total=rev.reduce((s,m)=>s+m.total,0);
-  const body=total>0?revChartSVG(rev.map(m=>({label:m.label,year:m.year,value:m.total})),dashRevChart,height):`<div class="empty" style="padding:30px"><div class="big">📊</div>No revenue recorded yet — mark some jobs paid and it'll show here.</div>`;
+  const body=total>0?areaChartSVG(rev.map(m=>({label:m.label,year:m.year,value:m.total})),height):`<div class="empty" style="padding:30px"><div class="big">📊</div>No revenue recorded yet — mark some jobs paid and it'll show here.</div>`;
   return `<div class="panel" style="margin-bottom:18px"><h2>📈 ${esc(title)} <span class="spacer"></span><span class="money pos" style="font-size:15px">${money(total)}</span></h2><div class="panel-pad" style="padding:14px 16px">${body}</div></div>`;
 }
 
@@ -691,30 +673,48 @@ function render(){
 function todayLong(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
 
 /* ---- Dashboard ---- */
-/* Rotating personal stat greeting — different line every visit. */
+/* Personal stat greeting — ONE line picked per app-open (stable while clicking around),
+   a different one next time the app opens. Stats span week/month/quarter/year/all-time. */
+let heroPick=-1;
 function heroCard(){
-  const ym=today().slice(0,7),mon=new Date().toLocaleDateString(undefined,{month:"long"});
-  const inMon=db.jobs.filter(j=>j.status!=="cancelled"&&(j.date||"").slice(0,7)===ym);
-  const monthCollected=inMon.reduce((s,j)=>s+(+j.collected||0),0);
+  const t=today(),ym=t.slice(0,7),Y=t.slice(0,4);
+  const mon=new Date().toLocaleDateString(undefined,{month:"long"});
+  const live=db.jobs.filter(j=>j.status!=="cancelled");
+  const sumFrom=from=>live.filter(j=>j.date&&j.date>=from&&j.date<=t).reduce((s,j)=>s+(+j.collected||0),0);
+  const week=sumFrom(offset(-6));
+  const inMon=live.filter(j=>(j.date||"").slice(0,7)===ym);
+  const month=inMon.reduce((s,j)=>s+(+j.collected||0),0);
   const monthJobs=inMon.filter(j=>j.status==="completed").length;
-  const allTime=db.jobs.filter(j=>j.status!=="cancelled").reduce((s,j)=>s+(+j.collected||0),0);
+  const q=Math.floor(new Date().getMonth()/3);
+  const quarter=live.filter(j=>{const m=+(j.date||"").slice(5,7);return (j.date||"").slice(0,4)===Y&&m>=q*3+1&&m<=q*3+3;}).reduce((s,j)=>s+(+j.collected||0),0);
+  const year=live.filter(j=>(j.date||"").slice(0,4)===Y).reduce((s,j)=>s+(+j.collected||0),0);
+  const allTime=live.reduce((s,j)=>s+(+j.collected||0),0);
   const out=totalOutstanding();
   const byDay={};inMon.forEach(j=>{if(j.date)byDay[j.date]=(byDay[j.date]||0)+(+j.collected||0);});
   const bestDay=Math.max(0,...Object.values(byDay));
+  const custN=db.customers.length;
   const name=firstName(db.settings.business.name||"").replace(/'s$/i,"")||"boss";
   const opts=[];
-  if(monthCollected>0){
-    opts.push(`In ${mon}, you've collected <b>${money(monthCollected)}</b>. Keep it up, ${name}! 💪`);
-    opts.push(`<b>${money(monthCollected)}</b> in the books for ${mon} — momentum, ${name}. 🚀`);}
-  if(monthJobs>0)opts.push(`<b>${monthJobs} job${monthJobs>1?"s":""}</b> finished in ${mon}. The grind pays, ${name}. 🔥`);
-  if(bestDay>0)opts.push(`Best day this month: <b>${money(bestDay)}</b>. Let's beat it, ${name}. ⚡`);
-  if(allTime>0)opts.push(`<b>${money(allTime)}</b> collected all-time. Empire in progress, ${name}. 🏆`);
-  if(out>0)opts.push(`<b>${money(out)}</b> is still out there — go get it, ${name}. 🎯`);
+  if(week>0){
+    opts.push(`<b>${money(week)}</b> in the last 7 days. Stack it, ${name}. 🧱`);
+    opts.push(`This week alone: <b>${money(week)}</b>. Windows fear you, ${name}. 🪟`);}
+  if(month>0){
+    opts.push(`In ${mon}, you've collected <b>${money(month)}</b>. Keep it up, ${name}! 💪`);
+    opts.push(`<b>${money(month)}</b> banked in ${mon} — momentum looks good, ${name}. 🚀`);}
+  if(monthJobs>0)opts.push(`<b>${monthJobs} job${monthJobs>1?"s":""}</b> closed out in ${mon}. The grind pays, ${name}. 🔥`);
+  if(bestDay>0)opts.push(`Best day of ${mon}: <b>${money(bestDay)}</b>. Beat it, ${name}. ⚡`);
+  if(quarter>0)opts.push(`<b>${money(quarter)}</b> this quarter. The season's paying off, ${name}. 📈`);
+  if(year>0)opts.push(`<b>${money(year)}</b> collected in ${Y}. Real business now, ${name}. 🏗️`);
+  if(allTime>0){
+    opts.push(`<b>${money(allTime)}</b> all-time. From one squeegee to all this, ${name}. 🏆`);
+    opts.push(`Lifetime: <b>${money(allTime)}</b> across <b>${custN}</b> customers. Empire in progress, ${name}. 👑`);}
+  if(out>0)opts.push(`<b>${money(out)}</b> is still out there — go collect it, ${name}. 🎯`);
   if(!opts.length)opts.push(`Fresh page today — let's make it count, ${name}. ☀️`);
+  if(heroPick<0)heroPick=Math.floor(Math.random()*9973); // rolled once per app-open
   const h=new Date().getHours();
   const greet=h<12?"Good morning":h<17?"Good afternoon":"Good evening";
   return `<div class="hero-card"><div class="hg">${greet}, ${esc(name)}</div>
-    <div class="hline">${opts[Math.floor(Math.random()*opts.length)]}</div></div>`;
+    <div class="hline">${opts[heroPick%opts.length]}</div></div>`;
 }
 function renderDashboard(){
   const t=today();
@@ -763,7 +763,6 @@ function renderDashboard(){
   bindJobCards(); bindMiniRows();
   document.querySelectorAll(".stat.link").forEach(el=>el.onclick=()=>{view=el.dataset.nav;render();});
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;uiSet({revPeriod:dashRevPeriod});renderDashboard();});
-  document.querySelectorAll("[data-rc]").forEach(b=>b.onclick=()=>{dashRevChart=b.dataset.rc;uiSet({revChart:dashRevChart});renderDashboard();});
   bindChartTips();
   const rt=$("#remind-today"); if(rt) rt.onclick=()=>openBulk(todays.map(j=>({cust:custById(j.customerId),job:j})).filter(x=>x.cust&&x.cust.phone),true);
 }
@@ -1724,6 +1723,52 @@ function importEarnings(){
 }
 /* ===EARNINGS_IMPORT_END=== */
 
+/* ===CONTACTS_IMPORT_START=== */
+/* Client-tagged contacts from the owner's iCloud export (Windows/Snow/Hood tags only).
+   Rows: [firstName, phone, tag, note, kind(lead|active)].
+   Rules: phone already in CRM => skip (duplicate person). Several contacts share a first
+   name that exists in the CRM => DON'T guess which number is theirs — note the candidates
+   on the customer instead. Unique name + exactly one phoneless CRM match => attach phone.
+   Otherwise => new customer (active for windows/snow tags, lead for hood tags). */
+const CONTACTS_IMPORT={version:1,people:[]}; // public copy: contacts stripped — restore your backup file instead
+function importContacts(){
+  const res={attached:0,created:0,dup:0,skipped:[]};
+  const remaining=[];
+  for(const p of CONTACTS_IMPORT.people){
+    const ph=cleanNum(p[1]); if(!ph)continue;
+    if(db.customers.some(c=>cleanNum(c.phone)===ph)){res.dup++;continue;}
+    remaining.push([p[0],ph,p[2],p[3],p[4]]);
+  }
+  const groups={};remaining.forEach(p=>{(groups[p[0].toLowerCase()]=groups[p[0].toLowerCase()]||[]).push(p);});
+  for(const key of Object.keys(groups)){
+    const grp=groups[key];
+    const cands=db.customers.filter(c=>(c.name||"").trim().toLowerCase()===key);
+    if(grp.length>1&&cands.length){
+      res.skipped.push(grp[0][0]+" ("+grp.length+" numbers)");
+      const c0=cands[0];
+      if(!(c0.notes||"").includes("Possible numbers"))
+        c0.notes=(c0.notes?c0.notes+"\n":"")+"📇 Possible numbers from contacts: "+grp.map(p=>fmtPhone(p[1])+(p[2]?" ("+p[2]+")":"")).join(", ");
+      continue;
+    }
+    for(const g of grp){
+      const name=g[0],ph=g[1],tag=g[2],note=g[3],kind=g[4];
+      const phoneless=cands.filter(c=>!cleanNum(c.phone));
+      if(cands.length&&phoneless.length===1&&grp.length===1){
+        const c=phoneless[0];c.phone=ph;res.attached++;
+        c.log=c.log||[];c.log.push({t:Date.now(),m:"📇 Phone added from contacts"+(tag?" ("+tag+")":"")});
+      }else if(!cands.length||!phoneless.length){
+        db.customers.push({id:db.seqC++,name,phone:ph,email:"",street:"",city:"",state:"",zip:"",
+          status:kind==="lead"?"lead":"active",source:"",tags:[],access:"",
+          notes:"📇 "+[tag,note].filter(Boolean).join(" · "),followup:"",
+          log:[{t:Date.now(),m:"📇 Imported from contacts"}],created:Date.now()});
+        res.created++;
+      }else res.skipped.push(name);
+    }
+  }
+  return res;
+}
+/* ===CONTACTS_IMPORT_END=== */
+
 /* ---------------- Quick add (✨ text/screenshot → leads) ---------------- */
 const AI_KEY="servicepro.aikey"; // stored alone, never inside db → never leaves this PC in a backup
 /* Free local parser — handles "jane, 555 123 4567 12 maple ave 149$" without any AI. */
@@ -1852,10 +1897,16 @@ if((db.earningsImport||0)<EARNINGS_IMPORT.version){
   __earn=importEarnings();
   db.earningsImport=EARNINGS_IMPORT.version; save();
 }
+let __cont=null; // AFTER earnings import — contacts attach to the fullest customer book
+if((db.contactsImport||0)<CONTACTS_IMPORT.version){
+  __cont=importContacts();
+  db.contactsImport=CONTACTS_IMPORT.version; save();
+}
 render();
 if(db.migrated){toast("Your previous contacts were imported ✓","ok");delete db.migrated;save();}
 if(__ownerJobs)setTimeout(()=>toast(`Auto-loaded ${__ownerJobs} client sale${__ownerJobs!==1?"s":""} you sent — marked done & paid ✓`,"ok"),700);
 if(__earn)setTimeout(()=>toast(`📥 Earnings synced: ${__earn.added} jobs added, ${__earn.updated} amounts corrected, ${__earn.newCust} new customers`,"ok"),1200);
+if(__cont)setTimeout(()=>toast(`📇 Contacts synced: ${__cont.attached} phones attached, ${__cont.created} added, ${__cont.dup} already in CRM${__cont.skipped.length?`, ${__cont.skipped.length} ambiguous (noted)`:""}`,"ok"),1900);
 checkHelper();setInterval(checkHelper,8000);
 initAutoBackup();setInterval(paintBackupChip,60000);
 
