@@ -1677,6 +1677,53 @@ $("#paste-import").onclick=doPasteImport;
 $("#paste-text").addEventListener("input",pastePreview);
 $("#paste-overlay").addEventListener("click",e=>{if(e.target===$("#paste-overlay"))closePaste();});
 
+/* ===EARNINGS_IMPORT_START=== */
+/* Business earnings from the owner's wallet-app export (owner-approved 2026-07-04).
+   Policy: CSV wins — matching jobs get their real collected amount; everything else becomes a new completed job.
+   Rows: [name, service, dateISO, amount, note]. name "" => "Unnamed cash jobs" bucket. */
+const EARNINGS_IMPORT={version:1,rows:[]}; // public copy: earnings data stripped — restore your backup file instead
+function dnear(a,b){if(!a||!b)return false;return Math.abs(new Date(a+"T00:00:00")-new Date(b+"T00:00:00"))<=86400000;}
+function importEarnings(){
+  const touched=new Set(),created=new Set();let updated=0,added=0,newCust=0;
+  const UN="Unnamed cash jobs";
+  // Only match jobs that existed BEFORE this import — otherwise back-to-back visits
+  // (snow route, consecutive days) would overwrite each other instead of adding.
+  const findJob=(cid,service,date,amount)=>custJobs(cid).find(j=>!created.has(j.id)&&j.service===service&&
+    (dnear(j.date,date)||(!j.date&&Math.abs((+j.price||0)-amount)<=5)));
+  for(const[name,service,date,amount,note]of EARNINGS_IMPORT.rows){
+    let cust;
+    if(name){
+      const cands=db.customers.filter(c=>(c.name||"").trim().toLowerCase()===name.toLowerCase());
+      cust=cands.find(c=>findJob(c.id,service,date,amount))||cands[0];
+      if(!cust){cust={id:db.seqC++,name,phone:"",email:"",street:"",city:"",state:"",zip:"",status:"active",source:"",
+        tags:[],access:"",notes:"",followup:"",log:[{t:Date.now(),m:"📥 Imported from earnings log"}],created:Date.now()};
+        db.customers.push(cust);newCust++;}
+    }else{
+      cust=db.customers.find(c=>c.name===UN);
+      if(!cust){cust={id:db.seqC++,name:UN,phone:"",email:"",street:"",city:"",state:"",zip:"",status:"inactive",source:"",
+        tags:[],access:"",notes:"Jobs from the earnings log that had no client name attached.",followup:"",log:[],created:Date.now()};
+        db.customers.push(cust);newCust++;}
+    }
+    const job=name?findJob(cust.id,service,date,amount):null;
+    if(job){
+      if(touched.has(job.id)){job.price=Math.round((job.price+amount)*100)/100;} // split payment: 2nd row tops up the same job
+      else{job.price=Math.round(amount*100)/100;touched.add(job.id);updated++;}   // CSV wins: real collected amount replaces estimate
+      job.collected=job.price;
+      if(!job.date)job.date=date;
+      if(job.notes)job.notes=job.notes.replace("⚠ service date not provided — please add it","").trim();
+      if(note)job.notes=(job.notes?job.notes+" · ":"")+note;
+    }else{
+      const nid=db.seqJ++;created.add(nid);
+      db.jobs.push({id:nid,customerId:cust.id,service,price:amount,date,time:"",recurring:"none",
+        status:"completed",collected:amount,payMethod:"",crew:"",closedBy:"",commissionPct:0,
+        notes:note||"",created:Date.now(),completedAt:Date.now()});
+      added++;
+    }
+  }
+  return{updated,added,newCust};
+}
+/* ===EARNINGS_IMPORT_END=== */
+
 /* ---------------- Quick add (✨ text/screenshot → leads) ---------------- */
 const AI_KEY="servicepro.aikey"; // stored alone, never inside db → never leaves this PC in a backup
 /* Free local parser — handles "jane, 555 123 4567 12 maple ave 149$" without any AI. */
@@ -1800,9 +1847,15 @@ if((db.ownerImport||0)<OWNER_IMPORT.version){
   __ownerJobs=importOwnerData();
   db.ownerImport=OWNER_IMPORT.version; save();
 }
+let __earn=null; // AFTER importOwnerData — wallet rows must reconcile against the client book, not race it
+if((db.earningsImport||0)<EARNINGS_IMPORT.version){
+  __earn=importEarnings();
+  db.earningsImport=EARNINGS_IMPORT.version; save();
+}
 render();
 if(db.migrated){toast("Your previous contacts were imported ✓","ok");delete db.migrated;save();}
 if(__ownerJobs)setTimeout(()=>toast(`Auto-loaded ${__ownerJobs} client sale${__ownerJobs!==1?"s":""} you sent — marked done & paid ✓`,"ok"),700);
+if(__earn)setTimeout(()=>toast(`📥 Earnings synced: ${__earn.added} jobs added, ${__earn.updated} amounts corrected, ${__earn.newCust} new customers`,"ok"),1200);
 checkHelper();setInterval(checkHelper,8000);
 initAutoBackup();setInterval(paintBackupChip,60000);
 
