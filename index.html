@@ -2020,6 +2020,17 @@ if(__cont)setTimeout(()=>toast(`📇 Contacts synced: ${__cont.attached} phones 
 checkHelper();setInterval(checkHelper,8000);
 initAutoBackup();setInterval(paintBackupChip,60000);
 syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
+// iOS home-screen app: guarantee the topbar clears the status bar / Dynamic Island,
+// even when env(safe-area-inset-top) resolves to 0 (iOS caches install-time settings).
+(function fixSafeArea(){
+  if(!navigator.standalone)return; // true only for iOS Add-to-Home-Screen apps
+  const probe=document.createElement("div");
+  probe.style.cssText="position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top,0px);visibility:hidden";
+  document.body.appendChild(probe);
+  const inset=probe.offsetHeight; probe.remove();
+  const pad=Math.max(inset,59); // Dynamic Island reports ~59px; fall back to that when env() lies
+  const tb=document.querySelector(".topbar"); if(tb)tb.style.paddingTop=(pad+12)+"px";
+})();
 
 if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw.js");
 </script>
