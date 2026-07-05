@@ -556,12 +556,15 @@ function moneyShort(n){n=+n||0;const a=Math.abs(n);
   if(a>=1000)return "$"+(n/1000).toFixed(a%1000===0?0:1)+"k";return "$"+Math.round(n);}
 function niceCeil(v){if(v<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(v)));const f=v/p;
   const nf=f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10;return nf*p;}
-/* Chart geometry shared by every renderer. data=[{label,value,year?}] */
+/* Chart geometry shared by every renderer. data=[{label,value,year?}]
+   Draws at the REAL container width — phones get a chart built for their screen,
+   not a desktop-wide canvas scaled down into a squished ribbon. */
 function chartGeo(data,height){
-  const W=Math.max(540,data.length*70),H=height,padL=48,padR=16,padT=22,padB=26;
+  const cEl=$("#content");
+  const W=Math.max(300,((cEl&&cEl.offsetWidth)||900)-64),H=height,padL=48,padR=16,padT=22,padB=26;
   const cw=W-padL-padR,ch=H-padT-padB,n=data.length;
   const niceMax=niceCeil(Math.max(1,...data.map(d=>d.value))),ticks=4;
-  const step=Math.max(1,Math.ceil(n/12)),showLbl=i=>i%step===0||i===n-1; // thin x-labels so dense (daily) ranges stay legible
+  const step=Math.max(1,Math.ceil(n/Math.max(4,Math.floor(cw/58)))),showLbl=i=>i%step===0||i===n-1; // one x-label per ~58px
   const maxV=Math.max(0,...data.map(d=>d.value));
   let grid="";
   for(let i=0;i<=ticks;i++){const y=padT+ch-(ch*i/ticks);
@@ -1693,6 +1696,8 @@ $("#sync-chip").onclick=()=>{
   else syncPull().then(()=>syncPush());
 };
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncPull();}); // phone: pull when the app comes to the foreground
+let __rsz=null; // charts draw at container width — rebuild them on resize / rotation
+window.addEventListener("resize",()=>{clearTimeout(__rsz);__rsz=setTimeout(()=>{if(view==="dashboard"||view==="money")render();},250);});
 
 /* ---------------- Paste import ---------------- */
 const PASTE_SAMPLE="Jane;12 Maple Ave;+1 (555) 123-4567;275$;29th june;;";
