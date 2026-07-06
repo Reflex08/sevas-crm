@@ -170,8 +170,9 @@
   .recur{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;color:var(--purple);background:var(--purple-soft);border-radius:20px;padding:2px 9px}
 
   /* ---------- Modal ---------- */
-  .overlay{position:fixed;inset:0;background:rgba(2,8,16,.65);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding:34px 16px;overflow:auto}
+  .overlay{position:fixed;inset:0;background:rgba(2,8,16,.65);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding:34px 16px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .overlay.show{display:flex}
+  body:has(.overlay.show){overflow:hidden} /* page behind a modal must not scroll */
   #cust-overlay{z-index:50} #job-overlay{z-index:60} #sms-overlay,#bulk-overlay,#paste-overlay,#qa-overlay{z-index:70}
   .modal{background:#102c49;border:1px solid var(--line);border-radius:16px;width:100%;max-width:640px;box-shadow:var(--shadow-lg);margin:auto 0}
   .modal.lg{max-width:760px} .modal.sm{max-width:520px}
@@ -180,7 +181,7 @@
   .modal-head .hsub{color:var(--muted);font-size:12.5px;font-weight:600;margin-top:2px}
   .x{border:0;background:transparent;font-size:24px;color:var(--faint);line-height:1;padding:2px 7px;border-radius:8px}
   .x:hover{background:var(--hover);color:var(--ink)}
-  .modal-body{padding:20px 22px;max-height:70vh;overflow:auto}
+  .modal-body{padding:20px 22px;max-height:70vh;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px}
   .field{margin-bottom:13px}
@@ -263,14 +264,15 @@
     .bottombar{display:flex}
     .grid-2{grid-template-columns:1fr}.grid3{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}
     .content{padding:16px 14px 100px}
-    .topbar{padding:calc(env(safe-area-inset-top, 0px) + 12px) 14px 10px;flex-wrap:wrap;gap:8px} /* clears the Dynamic Island / status bar */
+    .topbar{padding:calc(var(--safetop, env(safe-area-inset-top, 0px)) + 12px) 14px 10px;flex-wrap:wrap;gap:8px} /* clears the Dynamic Island / status bar */
     .topbar h1{font-size:17px}
     .topbar .sub{display:none}
     .search{order:5;flex-basis:100%;max-width:none}
     .panel{overflow-x:auto}
     input,select,textarea{font-size:16px} /* 16px stops iOS zoom-on-focus */
-    .overlay{padding:calc(env(safe-area-inset-top) + 52px) 8px 24px} /* modals sit lower — clear of the notch & easy to reach */
-    .modal-body{max-height:70vh}
+    /* Phone: ONE scroll container — the overlay scrolls the whole modal (inner scroll areas fight iOS momentum + the keyboard) */
+    .overlay{padding:calc(var(--safetop, env(safe-area-inset-top)) + 52px) 8px calc(env(safe-area-inset-bottom) + 40px);backdrop-filter:none}
+    .modal-body{max-height:none;overflow:visible}
     .jobcard{flex-wrap:wrap}
     .jobcard .actions{max-width:none}
   }
@@ -296,7 +298,7 @@
   <main class="main">
     <div class="topbar">
       <div><h1 id="title">Dashboard</h1><div class="sub" id="subtitle"></div></div>
-      <div class="search"><span class="mag">⌕</span><input id="search" type="text" placeholder="Search customers, phone, address…"></div>
+      <div class="search"><span class="mag">⌕</span><input id="search" type="text" aria-label="Search"></div>
       <button class="btn" id="quick-add" title="Paste text or a screenshot — leads fill themselves out">✨ Quick add</button>
       <button class="btn btn-primary" id="add-job">＋ New Job</button>
       <button class="btn" id="add-cust">＋ Customer</button>
@@ -383,7 +385,7 @@
       <div class="field"><label>Status</label><label style="font-weight:600;display:flex;gap:8px;align-items:center;padding:9px 0 0"><input type="checkbox" id="paste-completed" checked style="width:auto"> Mark each as completed &amp; paid</label></div>
     </div>
     <div class="field"><label>Paste your clients (one per line)</label>
-      <textarea id="paste-text" style="min-height:210px;font-family:monospace;font-size:13px" placeholder="Jane;12 Maple Ave;+1 (555) 123-4567;275$;29th june;;"></textarea>
+      <textarea id="paste-text" style="min-height:210px;font-family:monospace;font-size:13px" placeholder="Name;Address;Phone;Price$;Date;;"></textarea>
       <div class="hint" id="paste-count"></div></div>
   </div>
   <div class="modal-foot"><button class="btn" id="paste-cancel">Cancel</button><button class="btn btn-primary" id="paste-import">Import all</button></div>
@@ -394,7 +396,7 @@
   <div class="modal-head"><div><h3>✨ Quick add</h3><div class="hsub">Tell it what happened — clients &amp; jobs fill themselves out</div></div><button class="x" id="qa-close">&times;</button></div>
   <div class="modal-body">
     <div class="field"><label>One client or job per line — say it like you'd text a friend</label>
-      <textarea id="qa-text" style="min-height:88px" placeholder="Judy today at 12 for 249 exterior windows&#10;Mike tomorrow 249 windows, 149 gutters&#10;jane, 555 123 4567, 12 maple ave, 149$"></textarea>
+      <textarea id="qa-text" style="min-height:88px"></textarea>
       <div class="hint">Knows: today / tomorrow / weekdays / June 5 · "at 12" · "for 249" · window, gutter, snow, pressure… Past date = done &amp; paid, future = booked.</div></div>
     <div class="field"><label>Screenshot (optional) — press Ctrl+V here, or</label>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -1145,20 +1147,20 @@ function custForm(c){
      <div class="sec">Job history <span style="-webkit-text-fill-color:initial;color:var(--brand);cursor:pointer;font-weight:800" id="cf-newjob2">＋ Add job</span></div>
      <div id="cf-jobs">${jobs.length?jobs.map(jobLine).join(""):`<div class="hint">No jobs yet — add the first one.</div>`}</div>
      <div class="sec">Activity log</div>
-     <div class="log-add"><input id="cf-loginput" placeholder="Log a call, note, payment…"><button class="btn btn-primary" id="cf-logadd">Add</button></div>
+     <div class="log-add"><input id="cf-loginput" aria-label="Log entry"><button class="btn btn-primary" id="cf-logadd">Add</button></div>
      <ul class="log" id="cf-log"></ul>`;
   }
   return `
     <div class="grid2">
-      <div class="field"><label>Name *</label><input id="cf-name" value="${c?esc(c.name):""}" placeholder="Maria Johnson"></div>
+      <div class="field"><label>Name *</label><input id="cf-name" value="${c?esc(c.name):""}"></div>
       <div class="field"><label>Phone</label><input id="cf-phone" value="${c?esc(c.phone):""}" placeholder="+1 555 123 4567"></div>
     </div>
-    <div class="field"><label>Address</label><input id="cf-street" value="${c?esc(c.street||""):""}" placeholder="412 Oakwood Dr"></div>
+    <div class="field"><label>Address</label><input id="cf-street" value="${c?esc(c.street||""):""}"></div>
     <div class="grid2">
       <div class="field"><label>Status</label><select id="cf-status">${statusOpts}</select></div>
       <div class="field"><label>Follow-up date</label><input id="cf-followup" type="date" value="${c?esc(c.followup||""):""}"></div>
     </div>
-    <div class="field"><label>Notes</label><textarea id="cf-notes" placeholder="Gate codes, dog, parking, preferences — anything to remember…">${c?esc(c.notes||""):""}</textarea></div>
+    <div class="field"><label>Notes</label><textarea id="cf-notes">${c?esc(c.notes||""):""}</textarea></div>
     ${history}`;
 }
 function jobLine(j){
@@ -1213,7 +1215,12 @@ $("#cust-delete").onclick=()=>{const c=custById(editCust);if(!c)return;
   save();closeCust();render();toast("Customer deleted");};
 $("#cust-text").onclick=()=>{const c=custById(editCust);persistCustEdits();const j=custNext(editCust)||custLast(editCust);openSms(c,j);};
 $("#cust-addjob").onclick=()=>{if(persistCustEdits())openJob(null,false,editCust);};
-$("#cust-overlay").addEventListener("click",e=>{if(e.target===$("#cust-overlay"))closeCust();});
+// A tap closes a modal only if it STARTED on the backdrop — a scroll drag that ends past the
+// modal's edge makes the click land on the overlay and used to dismiss it mid-scroll on phones.
+let __pdBackdrop=null;
+document.addEventListener("pointerdown",e=>{__pdBackdrop=(e.target.classList&&e.target.classList.contains("overlay"))?e.target:null;},true);
+const backdropTap=(e,ov)=>e.target===ov&&__pdBackdrop===ov;
+$("#cust-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#cust-overlay")))closeCust();});
 
 /* ---------------- Job modal ---------------- */
 function openJob(id,focusPay,presetCust){
@@ -1243,8 +1250,8 @@ function jobForm(j,cid){
       <div class="hint">Not in the list? <span style="color:var(--brand);cursor:pointer;font-weight:700" id="jf-newcust">＋ Add a new customer first</span></div></div>
     <div class="grid2">
       <div class="field"><label>Service</label><select id="jf-service">${svcOpts}</select></div>
-      <div class="field" id="jf-customwrap" style="${isCustom?"":"display:none"}"><label>Custom service name</label><input id="jf-customsvc" value="${isCustom?esc(j.service):""}" placeholder="Describe the service"></div>
-      <div class="field pre"><label>Price / quote</label><span class="sym" style="top:33px">$</span><input id="jf-price" type="number" min="0" step="1" value="${price}" placeholder="0"></div>
+      <div class="field" id="jf-customwrap" style="${isCustom?"":"display:none"}"><label>Custom service name</label><input id="jf-customsvc" value="${isCustom?esc(j.service):""}"></div>
+      <div class="field pre"><label>Price / quote</label><span class="sym" style="top:33px">$</span><input id="jf-price" type="number" min="0" step="1" value="${price}"></div>
     </div>
     <div class="grid3">
       <div class="field"><label>Date</label><input id="jf-date" type="date" value="${j?esc(j.date):today()}"></div>
@@ -1253,16 +1260,16 @@ function jobForm(j,cid){
     </div>
     <div class="grid2">
       <div class="field"><label>Status</label><select id="jf-status">${statusOpts}</select></div>
-      <div class="field"><label>Crew / assigned to</label><input id="jf-crew" value="${j?esc(j.crew||""):""}" placeholder="Me, Team A…"></div>
+      <div class="field"><label>Crew / assigned to</label><input id="jf-crew" value="${j?esc(j.crew||""):""}"></div>
     </div>
     <div class="grid2">
-      <div class="field"><label>💼 Closed by (salesman)</label><input id="jf-closedby" value="${j?esc(j.closedBy||""):""}" placeholder="Who closed the sale"></div>
-      <div class="field pre"><label>Commission %</label><span class="sym" style="top:33px">%</span><input id="jf-commission" type="number" min="0" max="100" value="${j&&j.commissionPct?j.commissionPct:""}" placeholder="0" style="padding-left:24px"></div>
+      <div class="field"><label>💼 Closed by (salesman)</label><input id="jf-closedby" value="${j?esc(j.closedBy||""):""}"></div>
+      <div class="field pre"><label>Commission %</label><span class="sym" style="top:33px">%</span><input id="jf-commission" type="number" min="0" max="100" value="${j&&j.commissionPct?j.commissionPct:""}" style="padding-left:24px"></div>
     </div>
-    <div class="field"><label>Job notes</label><textarea id="jf-notes" placeholder="Access, scope, special requests…">${j?esc(j.notes||""):""}</textarea></div>
+    <div class="field"><label>Job notes</label><textarea id="jf-notes">${j?esc(j.notes||""):""}</textarea></div>
     <div class="sec">💵 Payment</div>
     <div class="grid3">
-      <div class="field pre"><label>Collected</label><span class="sym" style="top:33px">$</span><input id="jf-collected" type="number" min="0" step="1" value="${j?(j.collected||""):""}" placeholder="0"></div>
+      <div class="field pre"><label>Collected</label><span class="sym" style="top:33px">$</span><input id="jf-collected" type="number" min="0" step="1" value="${j?(j.collected||""):""}"></div>
       <div class="field"><label>Method</label><select id="jf-paymethod">${payOpts}</select></div>
       <div class="field"><label>&nbsp;</label><button class="btn" id="jf-payfull" style="width:100%">Mark paid in full</button></div>
     </div>
@@ -1338,7 +1345,7 @@ $("#job-delete").onclick=()=>{if(!editJob)return;if(!confirm("Delete this job? T
   db.jobs=db.jobs.filter(x=>x.id!==editJob);save();closeJob();
   if($("#cust-overlay").classList.contains("show")&&editCust)openCust(editCust);render();toast("Job deleted");};
 $("#job-text").onclick=()=>{const data=gatherJob();const c=custById(data.customerId);if(c)openSms(c,Object.assign({},data));};
-$("#job-overlay").addEventListener("click",e=>{if(e.target===$("#job-overlay"))closeJob();});
+$("#job-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#job-overlay")))closeJob();});
 
 /* ---------------- Texting ---------------- */
 function fillVars(text,c,j){
@@ -1388,7 +1395,7 @@ $("#sms-template").onchange=applySmsTpl;
 $("#sms-body").addEventListener("input",updateCounter);
 function closeSms(){$("#sms-overlay").classList.remove("show");smsCtx=null;}
 $("#sms-cancel").onclick=closeSms;$("#sms-close").onclick=closeSms;
-$("#sms-overlay").addEventListener("click",e=>{if(e.target===$("#sms-overlay"))closeSms();});
+$("#sms-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#sms-overlay")))closeSms();});
 $("#sms-send").onclick=async()=>{
   const to=cleanNum($("#sms-to").value),body=$("#sms-body").value;
   if(!to){toast("Enter a phone number","err");return;}
@@ -1430,7 +1437,7 @@ $("#bulk-template").onchange=()=>{const t=db.settings.templates.find(x=>x.id===$
 $("#bulk-body").addEventListener("input",bulkNote);
 function closeBulk(){$("#bulk-overlay").classList.remove("show");}
 $("#bulk-cancel").onclick=closeBulk;$("#bulk-close").onclick=closeBulk;
-$("#bulk-overlay").addEventListener("click",e=>{if(e.target===$("#bulk-overlay"))closeBulk();});
+$("#bulk-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#bulk-overlay")))closeBulk();});
 $("#bulk-send").onclick=async()=>{
   if(!helperOnline)return;
   if(!confirm(`Send this text to ${bulkList.length} people now? This uses your Twilio account.`))return;
@@ -1697,11 +1704,13 @@ $("#sync-chip").onclick=()=>{
   else syncPull().then(()=>syncPush());
 };
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncPull();}); // phone: pull when the app comes to the foreground
-let __rsz=null; // charts draw at container width — rebuild them on resize / rotation
-window.addEventListener("resize",()=>{clearTimeout(__rsz);__rsz=setTimeout(()=>{if(view==="dashboard"||view==="money")render();},250);});
+let __rsz=null,__rw=window.innerWidth; // charts draw at container width — rebuild on rotation only.
+// iOS fires resize for the keyboard and URL bar too (height-only) — re-rendering then steals input focus mid-typing.
+window.addEventListener("resize",()=>{clearTimeout(__rsz);__rsz=setTimeout(()=>{
+  if(window.innerWidth===__rw)return; __rw=window.innerWidth;
+  if(view==="dashboard"||view==="money")render();},250);});
 
 /* ---------------- Paste import ---------------- */
-const PASTE_SAMPLE="Jane;12 Maple Ave;+1 (555) 123-4567;275$;29th june;;";
 /* Real client data the owner sent me — auto-loaded once (done + paid).
    Columns: name, street, phone, price, dateISO, commission%, closedBy, followupISO
    Add rows and bump `version` to load new ones. */
@@ -1748,7 +1757,6 @@ function findCust(name,phone){
 }
 function openPaste(){
   $("#paste-service").innerHTML=db.settings.services.map(s=>`<option>${esc(s.name)}</option>`).join("")+`<option>Other</option>`;
-  if(!$("#paste-text").value.trim())$("#paste-text").value=PASTE_SAMPLE;
   pastePreview();
   $("#paste-overlay").classList.add("show");
   setTimeout(()=>$("#paste-text").focus(),50);
@@ -1790,7 +1798,7 @@ function doPasteImport(){
 $("#paste-close").onclick=closePaste;$("#paste-cancel").onclick=closePaste;
 $("#paste-import").onclick=doPasteImport;
 $("#paste-text").addEventListener("input",pastePreview);
-$("#paste-overlay").addEventListener("click",e=>{if(e.target===$("#paste-overlay"))closePaste();});
+$("#paste-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#paste-overlay")))closePaste();});
 
 /* ===EARNINGS_IMPORT_START=== */
 /* Business earnings from the owner's wallet-app export (owner-approved 2026-07-04).
@@ -2041,7 +2049,7 @@ function qaPaint(){
 }
 $("#quick-add").onclick=openQuick;
 $("#qa-close").onclick=closeQuick;$("#qa-cancel").onclick=closeQuick;
-$("#qa-overlay").addEventListener("click",e=>{if(e.target===$("#qa-overlay"))closeQuick();});
+$("#qa-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#qa-overlay")))closeQuick();});
 $("#qa-text").addEventListener("input",qaParseText);
 $("#qa-status").querySelectorAll("button").forEach(b=>b.onclick=()=>{qaStatus=b.dataset.qs;
   $("#qa-status").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));qaPaint();});
@@ -2118,7 +2126,7 @@ syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
   document.body.appendChild(probe);
   const inset=probe.offsetHeight; probe.remove();
   const pad=Math.max(inset,59); // Dynamic Island reports ~59px; fall back to that when env() lies
-  const tb=document.querySelector(".topbar"); if(tb)tb.style.paddingTop=(pad+12)+"px";
+  document.documentElement.style.setProperty("--safetop",pad+"px"); // topbar AND modal overlays read this
 })();
 
 if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw.js");
