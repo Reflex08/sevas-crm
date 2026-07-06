@@ -394,7 +394,7 @@
   <div class="modal-head"><div><h3>✨ Quick add</h3><div class="hsub">Tell it what happened — clients &amp; jobs fill themselves out</div></div><button class="x" id="qa-close">&times;</button></div>
   <div class="modal-body">
     <div class="field"><label>One client or job per line — say it like you'd text a friend</label>
-      <textarea id="qa-text" style="min-height:88px" placeholder="Judy today at 12 for 249 exterior windows&#10;booked Mike tomorrow at 3 gutters for 175&#10;jane, 555 123 4567, 12 maple ave, 149$"></textarea>
+      <textarea id="qa-text" style="min-height:88px" placeholder="Judy today at 12 for 249 exterior windows&#10;Mike tomorrow 249 windows, 149 gutters&#10;jane, 555 123 4567, 12 maple ave, 149$"></textarea>
       <div class="hint">Knows: today / tomorrow / weekdays / June 5 · "at 12" · "for 249" · window, gutter, snow, pressure… Past date = done &amp; paid, future = booked.</div></div>
     <div class="field"><label>Screenshot (optional) — press Ctrl+V here, or</label>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -1895,40 +1895,63 @@ const QA_SERVICES=[["gutter","Gutter Cleaning"],["soffit","Soffit Cleaning"],["p
   ["driveway","Driveway / Concrete"],["concrete","Driveway / Concrete"],["screen","Screen Repair"],["window","Window Cleaning"]];
 function quickParseLine(line){
   let s=(line||"").trim(); if(!s)return null;
-  const out={name:"",phone:"",address:"",price:0,notes:"",date:"",time:"",service:"",job:false};
+  const out={name:"",phone:"",address:"",price:0,notes:"",date:"",time:"",service:"",job:false,items:[]};
   const eat=re=>{const m=s.match(re);if(m)s=s.replace(m[0]," ");return m;};
   let m=eat(/(\+?1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/); if(m)out.phone=cleanNum(m[0]);
-  m=eat(/\$\s?(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s?\$/); if(m)out.price=+(m[1]||m[2])||0;
-  if(!out.price){m=eat(/\b(?:for|paid|collected)\s+\$?(\d{2,5}(?:\.\d{1,2})?)\b/i);
-    if(m){out.price=+m[1];out.job=true;}} // "for 249" / "paid 249" = money talk, this is a job
-  m=eat(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  m=eat(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i)||eat(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
   if(m){let h=+m[1];const ap=(m[3]||"").toLowerCase();
     if(ap==="pm"&&h<12)h+=12; else if(ap==="am"&&h===12)h=0; else if(!ap&&h>=1&&h<8)h+=12; // bare 1–7 = afternoon
     out.time=String(h).padStart(2,"0")+":"+(m[2]||"00");out.job=true;}
-  if(eat(/\btoday\b|\btonight\b/i)){out.date=today();out.job=true;}
-  else if(eat(/\btomorrow\b/i)){out.date=offset(1);out.job=true;}
+  if(eat(/\b(?:today|tonight)\b/i)){out.date=today();out.job=true;}
+  else if(eat(/\b(?:tomorrow|tmrw|tmr)\b/i)){out.date=offset(1);out.job=true;}
   else if(eat(/\byesterday\b/i)){out.date=offset(-1);out.job=true;}
   else{
     const wd=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
-    m=eat(new RegExp("\\b("+wd.join("|")+")\\b","i"));
+    m=eat(new RegExp("\\b(?:next\\s+|this\\s+)?("+wd.join("|")+")\\b","i"));
     if(m){const want=wd.indexOf(m[1].toLowerCase()),d=new Date();
       d.setDate(d.getDate()+((want-d.getDay()+7)%7));out.date=d.toISOString().slice(0,10);out.job=true;}
     else{m=eat(/\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i);
       if(m){const d=parseLooseDate(m[1]);if(d){out.date=d;out.job=true;}}}
   }
-  if(/\b(did|done|finished|completed|washed|cleaned|scheduled|booked)\b/i.test(s)){out.job=true;
-    s=s.replace(/\b(did|done|finished|completed|washed|cleaned|scheduled|booked)\b/ig," ");}
-  for(const[kw,svc]of QA_SERVICES){const re=new RegExp("\\b"+kw.replace(" ","\\s+")+"[a-z]*\\b","i");
-    if(re.test(s)){out.service=svc;out.job=true;s=s.replace(re," ");break;}}
-  if(/\bexterior\b/i.test(s))out.notes="exterior"; else if(/\binterior\b/i.test(s))out.notes="interior";
-  s=s.replace(/\b(for|at|on|and|her|his|him|she|he|the|a|an|i|we|exterior|interior|house|home|of)\b/ig," ");
-  const toks=s.replace(/[;,]+/g," ").replace(/\s+/g," ").trim().split(" ").filter(Boolean);
+  if(/\b(did|done|finished|completed|washed|cleaned|scheduled|booked|logged|had)\b/i.test(s)){out.job=true;
+    s=s.replace(/\b(did|done|finished|completed|washed|cleaned|scheduled|booked|logged|had)\b/ig," ");}
+  if(eat(/\bexterior\b/i))out.notes="exterior"; else if(eat(/\binterior\b/i))out.notes="interior";
+  // Each comma/"and" chunk can carry its own service + price: "Judy today 249 windows, 149 gutters" = 2 jobs.
+  const rests=[];
+  for(const seg of s.split(/[,;&]+|\band\b|\bplus\b/i)){
+    let t=seg,price=0,paid=false,service="";
+    let mm=t.match(/\$\s?(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s?\$/);
+    if(mm){price=+(mm[1]||mm[2])||0;t=t.replace(mm[0]," ");}
+    if(!price){mm=t.match(/\b(?:for|paid|collected|charged|quoted)\s+\$?(\d{2,5}(?:\.\d{1,2})?)\b/i);
+      if(mm){price=+mm[1];paid=true;t=t.replace(mm[0]," ");}} // "for 249" / "paid 249" = money talk, this is a job
+    for(const[kw,svc]of QA_SERVICES){const re=new RegExp("\\b"+kw.replace(" ","\\s+")+"[a-z]*\\b","i");
+      if(re.test(t)){service=svc;
+        if(!price){ // bare number touching the service word is its price: "249 windows" / "windows 249"
+          const kre=kw.replace(" ","\\s+")+"[a-z]*";
+          const m2=t.match(new RegExp("\\b(\\d{2,5})\\s+"+kre+"\\b|\\b"+kre+"\\s+(\\d{2,5})\\b","i"));
+          if(m2&&+(m2[1]||m2[2])>=20){price=+(m2[1]||m2[2]);t=t.replace(m2[0]," ");}
+        }
+        t=t.replace(re," ");break;}}
+    if(price||service){out.items.push({service,price});if(paid||service)out.job=true;}
+    rests.push(t);
+  }
+  s=rests.join(" ");
+  s=s.replace(/(\w)['’]s\b/g,"$1") // "Tina's windows" → Tina
+     .replace(/[.:!?]+/g," ")
+     .replace(/\b(for|at|on|in|to|with|from|and|her|his|him|she|he|the|a|an|i|we|of|house|home|this|next|new|add|log|book|client|lead|customer|guy|lady|mr|mrs|ms)\b/ig," ");
+  const toks=s.replace(/\s+/g," ").trim().split(" ").filter(Boolean);
   let i=0,nameToks=[];
   while(i<toks.length&&!/\d/.test(toks[i])&&nameToks.length<3){nameToks.push(toks[i]);i++;} // name = leading words before the first digit
   out.name=nameToks.map(w=>w[0].toUpperCase()+w.slice(1)).join(" ");
   out.address=toks.slice(i).join(" ");
   if(!out.name&&!out.phone)return null;
-  if(out.job){if(!out.service)out.service="Window Cleaning";if(!out.date)out.date=today();}
+  if(out.job){
+    if(!out.items.length)out.items.push({service:"",price:0});
+    for(const it of out.items)if(!it.service)it.service="Window Cleaning";
+    if(!out.date)out.date=today();
+  }
+  out.price=out.items.length?out.items[0].price:0;
+  out.service=out.items.length?out.items[0].service:"";
   return out;
 }
 /* Claude vision — only path that needs a key (screenshots can't be read locally). */
@@ -1954,7 +1977,10 @@ function quickCommit(rows,status){
   for(const r of rows){
     let c=findCust(r.name,r.phone);
     if(!c&&r.name){ // "Judy" alone should find the existing Judy even though she has a phone on file
-      const cands=db.customers.filter(x=>(x.name||"").trim().toLowerCase()===r.name.toLowerCase());
+      const n=r.name.trim().toLowerCase();
+      let cands=db.customers.filter(x=>(x.name||"").trim().toLowerCase()===n);
+      if(!cands.length) // "Tina" should still find "Tina Moroz" — first-name match, only when unambiguous
+        cands=db.customers.filter(x=>(x.name||"").trim().toLowerCase().split(/\s+/)[0]===n.split(/\s+/)[0]);
       if(cands.length===1)c=cands[0];
     }
     const note=[!r.job&&r.price?("Quoted "+money(r.price)):"",(!r.job&&r.notes)||""].filter(Boolean).join(" · ");
@@ -1966,11 +1992,14 @@ function quickCommit(rows,status){
       if(note)c.notes=c.notes?(c.notes+"\n"+note):note;updated++;}
     if(r.job){
       const done=r.date<=today();
-      db.jobs.push({id:db.seqJ++,customerId:c.id,service:r.service,price:r.price||0,date:r.date,time:r.time||"",
-        recurring:"none",status:done?"completed":"scheduled",collected:done?(r.price||0):0,payMethod:"",
-        crew:"",closedBy:"",commissionPct:0,notes:r.notes||"",created:Date.now(),completedAt:done?Date.now():0});
-      c.log=c.log||[];c.log.push({t:Date.now(),m:`✨ Quick add: ${done?"logged":"booked"} ${r.service}${r.price?" · "+money(r.price):""}`});
-      jobs++;
+      const items=(r.items&&r.items.length)?r.items:[{service:r.service,price:r.price}];
+      for(const it of items){
+        db.jobs.push({id:db.seqJ++,customerId:c.id,service:it.service,price:it.price||0,date:r.date,time:r.time||"",
+          recurring:"none",status:done?"completed":"scheduled",collected:done?(it.price||0):0,payMethod:"",
+          crew:"",closedBy:"",commissionPct:0,notes:r.notes||"",created:Date.now(),completedAt:done?Date.now():0});
+        jobs++;
+      }
+      c.log=c.log||[];c.log.push({t:Date.now(),m:`✨ Quick add: ${done?"logged":"booked"} ${items.map(it=>it.service+(it.price?" "+money(it.price):"")).join(" + ")}`});
     }
   }
   save();return{added,updated,jobs};
@@ -1991,8 +2020,9 @@ function qaPaintPreview(){
   $("#qa-preview").innerHTML=qaRows.length?`<div class="sec">Ready to add</div>`+qaRows.map(r=>{
     const known=r.name&&db.customers.some(x=>(x.name||"").trim().toLowerCase()===r.name.toLowerCase());
     const who=`${esc(r.name)}${known?` <span class="badge b-active" style="font-size:10.5px">known client</span>`:""}`;
+    const its=(r.items&&r.items.length)?r.items:[{service:r.service,price:r.price}];
     const sub=r.job
-      ?`${esc(r.service)} · ${fmtDateShort(r.date)}${r.time?" "+fmtTime(r.time):""} · ${r.price?money(r.price):"no price"} · ${r.date<=today()?"✓ done &amp; paid":"📅 booked"}${r.notes?" · "+esc(r.notes):""}`
+      ?`${its.map(it=>esc(it.service)+(it.price?" "+money(it.price):"")).join(" + ")} · ${fmtDateShort(r.date)}${r.time?" "+fmtTime(r.time):""} · ${r.date<=today()?"✓ done &amp; paid":"📅 booked"}${r.notes?" · "+esc(r.notes):""}`
       :`${esc(fmtPhone(r.phone)||"no phone")} · ${esc(r.address||"no address")}${r.price?" · quoted "+money(r.price):""}`;
     return `<div class="jobline" style="cursor:default">
     <div class="avatar" style="background:${avatarColor(r.name)};width:32px;height:32px;font-size:12px">${esc(initials(r.name))}</div>
@@ -2003,7 +2033,7 @@ function qaPaint(){
   const hasKey=!!(localStorage.getItem(AI_KEY)||"");
   $("#qa-ai").style.display=qaImg?"":"none";
   $("#qa-add").disabled=!qaRows.length;
-  const nj=qaRows.filter(r=>r.job).length,np=qaRows.length-nj;
+  const nj=qaRows.reduce((s,r)=>s+(r.job?((r.items&&r.items.length)||1):0),0),np=qaRows.filter(r=>!r.job).length;
   $("#qa-add").textContent=qaRows.length?`Add ${[nj?nj+" job"+(nj>1?"s":""):"",np?np+" "+(qaStatus==="lead"?"lead":"client")+(np>1?"s":""):""].filter(Boolean).join(" + ")}`:"Add";
   const note=$("#qa-note");
   if(qaImg&&!hasKey){note.style.display="";note.innerHTML=`Reading screenshots needs your <b>Anthropic API key</b> — add it in Settings → ✨ AI Quick add. Plain text works without it.`;}
