@@ -539,7 +539,7 @@ function mapsUrl(c){return "https://www.google.com/maps/search/?api=1&query="+en
 /* ---------------- Aggregates ---------------- */
 const custById=id=>db.customers.find(c=>c.id===id);
 const custJobs=id=>db.jobs.filter(j=>j.customerId===id);
-function jobBalance(j){return j.status==="cancelled"?0:Math.max(0,(+j.price||0)-(+j.collected||0));}
+function jobBalance(j){return j.status!=="completed"?0:Math.max(0,(+j.price||0)-(+j.collected||0));} // money is owed only once the work is done — a booked job isn't a debt
 function payState(j){const p=+j.price||0,c=+j.collected||0;if(p<=0)return c>0?"paid":"none";if(c<=0)return "unpaid";if(c<p)return "partial";return "paid";}
 function custCollected(id){return custJobs(id).filter(j=>j.status!=="cancelled").reduce((s,j)=>s+(+j.collected||0),0);}
 function custBalance(id){return custJobs(id).reduce((s,j)=>s+jobBalance(j),0);}
@@ -1168,7 +1168,7 @@ function jobLine(j){
   return `<div class="jobline" data-jl="${j.id}">
     <div class="jl-date">${fmtDateShort(j.date)}<br><span class="sub" style="font-weight:600">${fmtTime(j.time)||""}</span></div>
     <div class="jl-svc">${esc(j.service)}<small>${money(j.price)} · ${st.label}${j.recurring&&j.recurring!=="none"?" · ↻":""}${j.closedBy?" · 💼 "+esc(j.closedBy):""}</small></div>
-    ${bal>0?`<span class="money owe">${money(bal)} due</span>`:`<span class="badge b-paid">paid</span>`}
+    ${j.status!=="completed"?"":bal>0?`<span class="money owe">${money(bal)} due</span>`:`<span class="badge b-paid">paid</span>`}
   </div>`;
 }
 function bindCustForm(c){
