@@ -110,6 +110,17 @@
   .grid-2{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;align-items:start}
   .col{display:flex;flex-direction:column;gap:18px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  details.money-details summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;
+    padding:15px 18px;font-size:14.5px;font-weight:800;user-select:none}
+  details.money-details summary::-webkit-details-marker{display:none}
+  details.money-details summary .chev{color:var(--muted);transition:transform .15s}
+  details.money-details[open] summary .chev{transform:rotate(90deg)}
+  details.more-fields{margin-top:6px}
+  details.more-fields summary{list-style:none;cursor:pointer;color:var(--muted);font-size:12.5px;font-weight:700;
+    padding:8px 0;user-select:none}
+  details.more-fields summary::-webkit-details-marker{display:none}
+  details.more-fields summary::before{content:"▸ ";color:var(--brand)}
+  details.more-fields[open] summary::before{content:"▾ "}
   .panel h2{margin:0;padding:15px 18px;font-size:15px;font-weight:800;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
   .panel h2 .pill{font-size:11.5px;font-weight:700;color:var(--muted);background:var(--gray-soft);border-radius:20px;padding:2px 9px}
   .panel h2 .spacer{flex:1}
@@ -223,11 +234,6 @@
   .log .txt{flex:1} .log .rm{border:0;background:transparent;color:var(--faint);cursor:pointer}
   .log .rm:hover{color:var(--red)}
 
-  .send-mode{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
-  .send-mode button{flex:1;border:0;background:var(--panel2);padding:10px;font-weight:700;color:var(--muted);border-right:1px solid var(--line)}
-  .send-mode button:last-child{border-right:0}
-  .send-mode button.active{background:var(--brand-soft);color:var(--brand)}
-  .send-mode button:disabled{opacity:.45;cursor:not-allowed}
   .note{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:12.5px;color:var(--muted)}
   .note b{color:var(--ink)}
   .counter{font-size:12px;color:var(--muted);margin-top:5px;font-weight:600}
@@ -283,13 +289,10 @@
   <aside class="sidebar">
     <div class="brand"><div>Seva<em>&#8217;s</em> Services<small>Window &amp; Home Services</small></div></div>
     <nav class="nav" id="nav">
-      <a data-view="dashboard" class="active"><span class="ic">▦</span> Dashboard</a>
+      <a data-view="dashboard" class="active"><span class="ic">▦</span> Home</a>
       <a data-view="schedule"><span class="ic">🗓️</span> Schedule <span class="count" id="c-sched">0</span></a>
-      <a data-view="customers"><span class="ic">👥</span> Customers <span class="count" id="c-cust">0</span></a>
-      <a data-view="money"><span class="ic">💵</span> Money</a>
-      <a data-view="settings"><span class="ic">⚙️</span> Settings</a>
+      <a data-view="customers"><span class="ic">👥</span> Clients <span class="count" id="c-cust">0</span></a>
     </nav>
-    <div class="helper-status" id="helper-status"><span class="led"></span><span id="helper-text">Auto-text: off</span></div>
     <div class="helper-status" id="backup-chip" title="Automatic backup status"><span class="led"></span><span id="backup-text">Auto-backup: off</span></div>
     <div class="helper-status" id="sync-chip" title="Cloud sync between your PC and phone"><span class="led"></span><span id="sync-text">Cloud sync: off</span></div>
     <div style="height:12px"></div>
@@ -297,11 +300,11 @@
 
   <main class="main">
     <div class="topbar">
-      <div><h1 id="title">Dashboard</h1><div class="sub" id="subtitle"></div></div>
-      <div class="search"><span class="mag">⌕</span><input id="search" type="text" aria-label="Search"></div>
-      <button class="btn" id="quick-add" title="Paste text or a screenshot — leads fill themselves out">✨ Quick add</button>
+      <div><h1 id="title">Home</h1><div class="sub" id="subtitle"></div></div>
+      <span class="spacer"></span>
+      <button class="btn" id="quick-add" title="Say what happened — clients & jobs fill themselves out">✨ Quick add</button>
       <button class="btn btn-primary" id="add-job">＋ New Job</button>
-      <button class="btn" id="add-cust">＋ Customer</button>
+      <button class="btn" id="open-settings" title="Settings">⚙️</button>
     </div>
     <div class="content" id="content"></div>
   </main>
@@ -312,8 +315,6 @@
   <a data-view="dashboard" class="active"><span>▦</span>Home</a>
   <a data-view="schedule"><span>🗓️</span>Schedule</a>
   <a data-view="customers"><span>👥</span>Clients</a>
-  <a data-view="money"><span>💵</span>Money</a>
-  <a data-view="settings"><span>⚙️</span>Settings</a>
 </nav>
 
 <!-- Customer modal -->
@@ -345,10 +346,6 @@
 <div class="overlay" id="sms-overlay"><div class="modal sm">
   <div class="modal-head"><h3 id="sms-title">Send a text</h3><button class="x" id="sms-close">&times;</button></div>
   <div class="modal-body">
-    <div class="send-mode" id="send-mode">
-      <button data-mode="app" class="active">📱 Open in messaging app</button>
-      <button data-mode="auto" id="mode-auto">⚡ Send automatically</button>
-    </div>
     <div class="field"><label>To</label><input id="sms-to" placeholder="+1 555 123 4567"></div>
     <div class="field"><label>Template</label><select id="sms-template"></select></div>
     <div class="field"><label>Message</label><textarea id="sms-body" style="min-height:110px"></textarea>
@@ -356,19 +353,6 @@
     <div class="note" id="sms-note"></div>
   </div>
   <div class="modal-foot"><button class="btn" id="sms-cancel">Cancel</button><button class="btn btn-green" id="sms-send">Send</button></div>
-</div></div>
-
-<!-- Bulk SMS modal -->
-<div class="overlay" id="bulk-overlay"><div class="modal sm">
-  <div class="modal-head"><h3 id="bulk-title">Text multiple</h3><button class="x" id="bulk-close">&times;</button></div>
-  <div class="modal-body">
-    <div class="field"><label>Template</label><select id="bulk-template"></select></div>
-    <div class="field"><label>Message (details auto-fill per contact)</label><textarea id="bulk-body" style="min-height:100px"></textarea>
-      <div class="chips" id="bulk-vars"></div></div>
-    <div class="note" id="bulk-note"></div>
-    <div id="bulk-progress" style="margin-top:12px;font-weight:700"></div>
-  </div>
-  <div class="modal-foot"><button class="btn" id="bulk-cancel">Cancel</button><button class="btn btn-green" id="bulk-send">⚡ Send to all</button></div>
 </div></div>
 
 <!-- Paste import modal -->
@@ -508,7 +492,7 @@ function uiSet(p){localStorage.setItem("servicepro.ui",JSON.stringify(Object.ass
 /* ---------------- State ---------------- */
 let view="dashboard",query="",custFilter="all",custSort="name-asc",schedFilter="upcoming",moneyPeriod="month";
 let dashRevPeriod=uiPref().revPeriod||"month"; // chart style: smooth area, everywhere (bars/line retired)
-let editCust=null,editJob=null,draftLog=[],smsCtx=null,smsMode="app",bulkList=[],bulkCtxJob=false,helperOnline=false;
+let editCust=null,editJob=null,draftLog=[],smsCtx=null;
 
 /* ---------------- Utils ---------------- */
 const $=s=>document.querySelector(s);
@@ -545,7 +529,6 @@ function custCollected(id){return custJobs(id).filter(j=>j.status!=="cancelled")
 function custBalance(id){return custJobs(id).reduce((s,j)=>s+jobBalance(j),0);}
 function custNext(id){return custJobs(id).filter(j=>j.status==="scheduled"&&j.date>=today()).sort((a,b)=>a.date.localeCompare(b.date))[0];}
 function custLast(id){return custJobs(id).filter(j=>j.status==="completed").sort((a,b)=>b.date.localeCompare(a.date))[0];}
-function collectedInRange(from,to){return db.jobs.filter(j=>j.status!=="cancelled"&&j.date>=from&&j.date<=to).reduce((s,j)=>s+(+j.collected||0),0);}
 function totalOutstanding(){return db.jobs.reduce((s,j)=>s+jobBalance(j),0);}
 function revenueByMonth(n){
   const out=[];const base=new Date();base.setDate(1);
@@ -662,20 +645,16 @@ function dashRevenuePanel(){
       ${body}
     </div></div>`;
 }
-function revenuePanel(months,height,title){
-  const rev=revenueByMonth(months),total=rev.reduce((s,m)=>s+m.total,0);
-  const body=total>0?areaChartSVG(rev.map(m=>({label:m.label,year:m.year,value:m.total})),height):`<div class="empty" style="padding:30px"><div class="big">📊</div>No revenue recorded yet — mark some jobs paid and it'll show here.</div>`;
-  return `<div class="panel" style="margin-bottom:18px"><h2>📈 ${esc(title)} <span class="spacer"></span><span class="money pos" style="font-size:15px">${money(total)}</span></h2><div class="panel-pad" style="padding:14px 16px">${body}</div></div>`;
-}
 
 /* ---------------- Render ---------------- */
 function render(){
+  if(view==="money")view="dashboard"; // Money tab folded into Home
   $("#c-sched").textContent=db.jobs.filter(j=>j.status==="scheduled").length;
   $("#c-cust").textContent=db.customers.length;
   document.querySelectorAll("#nav a,#bottombar a").forEach(a=>a.classList.toggle("active",a.dataset.view===view));
-  const T={dashboard:["Dashboard",todayLong()],schedule:["Schedule","Upcoming jobs & appointments"],customers:["Customers","Your client & lead book"],money:["Money","Payments, revenue & balances"],settings:["Settings","Business setup, services & templates"]};
+  const T={dashboard:["Home",todayLong()],schedule:["Schedule","Upcoming jobs & appointments"],customers:["Clients","Your client & lead book"],settings:["Settings","Business setup, services & templates"]};
   $("#title").textContent=T[view][0]; $("#subtitle").textContent=T[view][1];
-  ({dashboard:renderDashboard,schedule:renderSchedule,customers:renderCustomers,money:renderMoney,settings:renderSettings}[view])();
+  ({dashboard:renderDashboard,schedule:renderSchedule,customers:renderCustomers,settings:renderSettings}[view])();
 }
 function todayLong(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
 
@@ -723,70 +702,33 @@ function heroCard(){
   return `<div class="hero-card"><div class="hg">${greet}, ${esc(name)}</div>
     <div class="hline">${opts[heroPick%opts.length]}</div></div>`;
 }
+let moneyOpen=false; // Money details <details> keeps its state across re-renders
 function renderDashboard(){
   const t=today();
   const todays=db.jobs.filter(j=>j.status==="scheduled"&&j.date===t).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
-  const weekEnd=offset(7);
-  const weekJobs=db.jobs.filter(j=>j.status==="scheduled"&&j.date>=t&&j.date<=weekEnd);
-  const monFrom=t.slice(0,7)+"-01", monTo=t.slice(0,7)+"-31";
-  const collected=collectedInRange(monFrom,monTo);
-  const outstanding=totalOutstanding();
-  const leads=db.customers.filter(c=>c.status==="lead");
   const dueFollow=db.customers.filter(c=>c.followup&&c.followup<=t);
-  const unpaid=db.jobs.filter(j=>jobBalance(j)>0).sort((a,b)=>b.date.localeCompare(a.date));
   const overdue=db.jobs.filter(j=>j.status==="scheduled"&&j.date<t);
 
   $("#content").innerHTML=`
    ${heroCard()}
    ${dashRevenuePanel()}
    <div class="panel" style="margin-bottom:18px">
-     <h2>📋 Today's schedule <span class="pill">${todays.length}</span><span class="spacer"></span>
-       ${todays.filter(j=>custById(j.customerId)&&custById(j.customerId).phone).length?`<button class="btn sm btn-green" id="remind-today">💬 Text reminders</button>`:""}</h2>
-     ${overdue.length?`<div style="padding:12px 18px 0"><div class="agenda-head overdue">⚠ ${overdue.length} overdue job${overdue.length!==1?"s":""} not marked done <span class="spacer"></span></div></div>`:""}
+     <h2>📋 Today's schedule <span class="pill">${todays.length}</span></h2>
+     ${overdue.length?`<div style="padding:12px 18px 0"><div class="agenda-head overdue">⚠ ${overdue.length} overdue job${overdue.length!==1?"s":""} not marked done</div></div>`:""}
      <div class="panel-pad" id="today-list"></div>
    </div>
-   <div class="stats">
-     <div class="stat link" data-nav="schedule"><div class="ic blue">🗓️</div><div class="label">Jobs today</div><div class="num">${todays.length}</div><div class="meta">${weekJobs.length} this week</div></div>
-     <div class="stat link" data-nav="money"><div class="ic green">💵</div><div class="label">Collected (${new Date().toLocaleDateString(undefined,{month:"short"})})</div><div class="num">${money(collected)}</div><div class="meta">this month</div></div>
-     <div class="stat link" data-nav="money"><div class="ic red">⏳</div><div class="label">Outstanding</div><div class="num">${money(outstanding)}</div><div class="meta">${unpaid.length} unpaid job${unpaid.length!==1?"s":""}</div></div>
-     <div class="stat link" data-nav="customers"><div class="ic amber">⏰</div><div class="label">Follow-ups due</div><div class="num">${dueFollow.length}</div><div class="meta">${leads.length?leads.length+" open lead"+(leads.length!==1?"s":""):"all clear"}</div></div>
-   </div>
-   <div class="grid-2">
-     <div class="panel"><h2>🌱 Needs follow-up <span class="pill">${dueFollow.length+leads.filter(c=>!c.followup).length}</span></h2><div class="panel-pad" id="follow-list"></div></div>
-     <div class="panel"><h2>💳 Money to collect <span class="pill">${unpaid.length}</span></h2><div class="panel-pad" id="unpaid-list"></div></div>
-   </div>`;
+   ${dueFollow.length?`<button class="btn" id="follow-pill" style="margin-bottom:18px">⏰ ${dueFollow.length} follow-up${dueFollow.length!==1?"s":""} due →</button>`:""}
+   ${moneyDetails()}`;
 
   $("#today-list").innerHTML = (overdue.concat(todays)).length
     ? overdue.map(j=>jobCard(j,true)).join("")+todays.map(j=>jobCard(j)).join("")
     : `<div class="empty"><div class="big">☀️</div>No jobs scheduled today. Enjoy the day — or book one!<br><button class="btn btn-primary" id="empty-add">＋ New Job</button></div>`;
   const ea=$("#empty-add"); if(ea) ea.onclick=()=>openJob(null);
+  const fp=$("#follow-pill"); if(fp) fp.onclick=()=>{view="customers";render();};
 
-  const followItems=[...dueFollow,...leads.filter(c=>!dueFollow.includes(c))].slice(0,6);
-  $("#follow-list").innerHTML = followItems.length ? followItems.map(c=>miniCustRow(c)).join("")
-    : `<div class="empty" style="padding:26px"><div class="big">✅</div>Nobody waiting on a call.</div>`;
-  $("#unpaid-list").innerHTML = unpaid.length ? unpaid.slice(0,6).map(j=>unpaidRow(j)).join("")
-    : `<div class="empty" style="padding:26px"><div class="big">🎉</div>Everyone's paid up!</div>`;
-
-  bindJobCards(); bindMiniRows();
-  document.querySelectorAll(".stat.link").forEach(el=>el.onclick=()=>{view=el.dataset.nav;render();});
+  bindJobCards(); bindMoneyDetails();
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;uiSet({revPeriod:dashRevPeriod});renderDashboard();});
   bindChartTips();
-  const rt=$("#remind-today"); if(rt) rt.onclick=()=>openBulk(todays.map(j=>({cust:custById(j.customerId),job:j})).filter(x=>x.cust&&x.cust.phone),true);
-}
-function miniCustRow(c){
-  const due=c.followup&&c.followup<=today();
-  return `<div class="jobline" data-cust="${c.id}">
-    <div class="avatar" style="background:${avatarColor(c.name)};width:34px;height:34px">${esc(initials(c.name))}</div>
-    <div class="jl-svc">${esc(c.name)}<small>${esc(c.city||fmtPhone(c.phone)||"")}${c.followup?` · follow-up ${due?`<span style="color:var(--red);font-weight:700">${fmtDateShort(c.followup)}</span>`:fmtDateShort(c.followup)}`:""}</small></div>
-    <span class="badge ${CUST_STATUS.find(s=>s.id===c.status).cls}">${CUST_STATUS.find(s=>s.id===c.status).label}</span>
-  </div>`;
-}
-function unpaidRow(j){const c=custById(j.customerId)||{name:"(deleted)"};
-  return `<div class="jobline" data-job="${j.id}">
-    <div class="jl-date">${fmtDateShort(j.date)}</div>
-    <div class="jl-svc">${esc(c.name)}<small>${esc(j.service)} · ${payState(j)==="partial"?"partial":"unpaid"}</small></div>
-    <span class="money owe">${money(jobBalance(j))}</span>
-  </div>`;
 }
 
 /* ---- Schedule ---- */
@@ -794,7 +736,6 @@ function renderSchedule(){
   const t=today();
   const showCompleted=schedFilter==="completed";
   let jobs=db.jobs.slice();
-  if(query) jobs=jobs.filter(j=>jobMatches(j,query));
   if(showCompleted){ jobs=jobs.filter(j=>j.status==="completed").sort((a,b)=>b.date.localeCompare(a.date)||(b.time||"").localeCompare(a.time||"")); }
   else { jobs=jobs.filter(j=>j.status==="scheduled").sort((a,b)=>a.date.localeCompare(b.date)||(a.time||"").localeCompare(b.time||"")); }
 
@@ -834,8 +775,6 @@ function renderSchedule(){
   const ea=$("#empty-add2"); if(ea) ea.onclick=()=>openJob(null);
   bindJobCards();
 }
-function jobMatches(j,q){q=q.toLowerCase();const c=custById(j.customerId)||{};
-  return [j.service,j.notes,j.crew,c.name,c.phone,c.city,c.street].some(v=>(v||"").toLowerCase().includes(q));}
 function jobCard(j,overdueFlag){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const st=JOB_STATUS.find(s=>s.id===j.status)||JOB_STATUS[0];
@@ -843,10 +782,8 @@ function jobCard(j,overdueFlag){
   const recur=RECUR.find(r=>r.id===j.recurring); const isRecur=j.recurring&&j.recurring!=="none";
   const barColor=j.status==="completed"?"var(--green)":(overdueFlag||j.date<today()&&j.status==="scheduled")?"var(--red)":"var(--brand)";
   const actions = j.status==="completed"
-    ? `${c.phone?`<button class="btn sm" data-remind="${j.id}">💬</button>`:""}<button class="btn sm" data-editjob="${j.id}">Open</button>`
-    : `${c.phone?`<button class="btn sm" data-remind="${j.id}" title="Text reminder">💬</button>`:""}
-       <button class="btn sm" data-collect="${j.id}" title="Collect payment">💲</button>
-       <button class="btn sm btn-green" data-complete="${j.id}">✓ Done</button>`;
+    ? `<button class="btn sm" data-editjob="${j.id}">Open</button>`
+    : `<button class="btn sm btn-green" data-complete="${j.id}">✓ Done</button>`;
   return `<div class="jobcard" data-jobcard="${j.id}">
     <div class="time"><div class="t">${fmtTime(j.time)||"—"}</div><div class="d">${fmtDow(j.date)} ${fmtDateShort(j.date)}</div></div>
     <div class="bar" style="background:${barColor}"></div>
@@ -854,9 +791,7 @@ function jobCard(j,overdueFlag){
       <div class="l1"><span class="svc">${esc(j.service)}</span>
         ${money(j.price)!=="$0"?`<span class="money">${money(j.price)}</span>`:""}
         ${isRecur?`<span class="recur">↻ ${recur.label}</span>`:""}
-        ${j.closedBy?`<span class="recur" style="color:var(--cyan);background:var(--cyan-soft)">💼 ${esc(j.closedBy)}${j.commissionPct?" · "+j.commissionPct+"%":""}</span>`:""}
-        ${j.status!=="scheduled"?`<span class="badge ${st.cls}">${st.label}</span>`:""}
-        ${bal>0&&j.status!=="scheduled"?`<span class="badge b-${ps}">${money(bal)} due</span>`:""}
+        ${bal>0?`<span class="badge b-${ps}">${money(bal)} due</span>`:""}
       </div>
       <div class="who">👤 ${esc(c.name)}${c.phone?` · <a href="tel:${esc(cleanNum(c.phone))}">${esc(fmtPhone(c.phone))}</a>`:""}${addr1(c)?` · 📍 <a href="${mapsUrl(c)}" target="_blank" rel="noopener">${esc(addrFull(c))}</a>`:""}</div>
       ${j.notes?`<div class="who" style="color:var(--faint)">📝 ${esc(j.notes)}</div>`:""}
@@ -866,24 +801,29 @@ function jobCard(j,overdueFlag){
 }
 function bindJobCards(){
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
-    el.onclick=e=>{ if(e.target.closest("[data-remind],[data-collect],[data-complete],[data-editjob]"))return; openJob(+el.dataset.jobcard); };
+    el.onclick=e=>{ if(e.target.closest("[data-complete],[data-editjob]"))return; openJob(+el.dataset.jobcard); };
   });
   document.querySelectorAll("[data-editjob]").forEach(b=>b.onclick=e=>{e.stopPropagation();openJob(+b.dataset.editjob);});
-  document.querySelectorAll("[data-remind]").forEach(b=>b.onclick=e=>{e.stopPropagation();const j=db.jobs.find(x=>x.id===+b.dataset.remind);openSms(custById(j.customerId),j);});
-  document.querySelectorAll("[data-collect]").forEach(b=>b.onclick=e=>{e.stopPropagation();openJob(+b.dataset.collect,true);});
   document.querySelectorAll("[data-complete]").forEach(b=>b.onclick=e=>{e.stopPropagation();completeJob(+b.dataset.complete);});
-}
-function bindMiniRows(){
-  document.querySelectorAll("[data-cust]").forEach(el=>el.onclick=()=>openCust(+el.dataset.cust));
-  document.querySelectorAll("[data-job]").forEach(el=>el.onclick=()=>openJob(+el.dataset.job,true));
 }
 
 /* ---- Customers ---- */
-function renderCustomers(){
+function custListRows(){
   let list=db.customers.slice();
   if(query) list=list.filter(c=>custMatches(c,query));
   if(custFilter!=="all") list=list.filter(c=>c.status===custFilter);
   list=sortCustomers(list);
+  return list;
+}
+function paintCustRows(){ // repaint just the table body — the search box keeps focus while typing
+  const list=custListRows();
+  $("#cust-tbody").innerHTML=list.length?list.map(custRow).join(""):
+    `<tr><td colspan="5"><div class="empty"><div class="big">👥</div>${query?"No one matches that search.":"No customers here yet."}<br><button class="btn btn-primary" id="empty-cust">＋ Add a customer</button></div></td></tr>`;
+  $("#cust-shown").textContent=list.length+" shown";
+  const ec=$("#empty-cust"); if(ec) ec.onclick=()=>openCust(null);
+  document.querySelectorAll("tr[data-cust]").forEach(tr=>tr.onclick=()=>openCust(+tr.dataset.cust));
+}
+function renderCustomers(){
   const counts={all:db.customers.length,lead:db.customers.filter(c=>c.status==="lead").length,active:db.customers.filter(c=>c.status==="active").length,inactive:db.customers.filter(c=>c.status==="inactive").length};
   const sortOpts=[["name-asc","Name A–Z"],["name-desc","Name Z–A"],["paid-desc","Paid: high → low"],["paid-asc","Paid: low → high"],["recent","Most recent service"],["oldest","Longest since service"]].map(([v,l])=>`<option value="${v}" ${custSort===v?"selected":""}>${l}</option>`).join("");
   const seg=`<div class="seg">
@@ -892,19 +832,19 @@ function renderCustomers(){
     <button data-cf="active" class="${custFilter==="active"?"active":""}">Active ${counts.active}</button>
     <button data-cf="inactive" class="${custFilter==="inactive"?"active":""}">Inactive ${counts.inactive}</button>
   </div>`;
-  const rows=list.length?list.map(custRow).join(""):
-    `<tr><td colspan="5"><div class="empty"><div class="big">👥</div>No customers here yet.<br><button class="btn btn-primary" id="empty-cust">＋ Add a customer</button></div></td></tr>`;
   $("#content").innerHTML=`
-    <div class="toolbar">${seg}<select id="cust-sort" title="Sort customers">${sortOpts}</select><span class="hint">${list.length} shown</span><span class="spacer"></span>
+    <div class="toolbar" style="margin-bottom:10px"><div class="search" style="max-width:none;flex:1"><span class="mag">⌕</span><input id="search" type="text" aria-label="Search clients"></div>
       <button class="btn btn-primary" id="cust-add2">＋ Customer</button></div>
+    <div class="toolbar">${seg}<select id="cust-sort" title="Sort customers">${sortOpts}</select><span class="hint" id="cust-shown"></span></div>
     <div class="panel"><table>
       <thead><tr><th>Customer</th><th>Phone</th><th>Address</th><th>Status</th><th class="r">Total paid</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+      <tbody id="cust-tbody"></tbody></table></div>`;
+  $("#search").value=query;
+  $("#search").addEventListener("input",e=>{query=e.target.value;paintCustRows();});
+  paintCustRows();
   document.querySelectorAll("[data-cf]").forEach(b=>b.onclick=()=>{custFilter=b.dataset.cf;renderCustomers();});
   $("#cust-sort").onchange=e=>{custSort=e.target.value;renderCustomers();};
   const ca=$("#cust-add2"); if(ca) ca.onclick=()=>openCust(null);
-  const ec=$("#empty-cust"); if(ec) ec.onclick=()=>openCust(null);
-  document.querySelectorAll("tr[data-cust]").forEach(tr=>tr.onclick=()=>openCust(+tr.dataset.cust));
 }
 function custMatches(c,q){q=q.toLowerCase();return [c.name,c.phone,c.email,c.street,c.city,c.zip,(c.tags||[]).join(" "),c.notes].some(v=>(v||"").toLowerCase().includes(q));}
 function sortCustomers(list){
@@ -933,8 +873,8 @@ function custRow(c){
   </tr>`;
 }
 
-/* ---- Money ---- */
-function renderMoney(){
+/* ---- Money details (collapsed section on Home) ---- */
+function moneyDetails(){
   const t=today(); const y=t.slice(0,4);
   let from,to,label;
   if(moneyPeriod==="month"){from=t.slice(0,7)+"-01";to=t.slice(0,7)+"-31";label="This month";}
@@ -946,52 +886,46 @@ function renderMoney(){
   const jobsDone=inRange.filter(j=>j.status==="completed").length;
   const outstanding=totalOutstanding();
   const unpaid=db.jobs.filter(j=>jobBalance(j)>0).sort((a,b)=>b.date.localeCompare(a.date));
-  // revenue by service
   const bySvc={}; inRange.forEach(j=>{bySvc[j.service]=(bySvc[j.service]||0)+(+j.collected||0);});
   const svcRows=Object.entries(bySvc).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   const maxSvc=Math.max(1,...svcRows.map(r=>r[1]));
   const recentPays=db.jobs.filter(j=>+j.collected>0).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
-  // commissions: sales closed per salesman in range (+ commission $ owed)
   const byCloser={}; inRange.forEach(j=>{if(j.closedBy){const o=byCloser[j.closedBy]=byCloser[j.closedBy]||{sales:0,count:0,comm:0};o.sales+=(+j.price||0);o.count++;o.comm+=(+j.price||0)*(+j.commissionPct||0)/100;}});
   const closerRows=Object.entries(byCloser).sort((a,b)=>b[1].comm-a[1].comm);
   const commTotal=closerRows.reduce((s,[,v])=>s+v.comm,0);
-  const commHtml=closerRows.length?`<div class="panel"><h2>💼 Commissions by closer <span class="pill">${label}</span><span class="spacer"></span><span class="money owe" style="font-size:14px">${money(commTotal)} owed</span></h2>
-    <table><thead><tr><th>Salesman</th><th class="r">Sales</th><th class="r">Closed</th><th class="r">Commission</th></tr></thead><tbody>
-    ${closerRows.map(([n,v])=>`<tr><td><div class="name-cell"><div class="avatar" style="background:${avatarColor(n)};width:30px;height:30px;border-radius:8px;font-size:11px">${esc(initials(n))}</div><span class="nm">${esc(n)}</span></div></td><td class="r mono">${v.count}</td><td class="r money pos">${money(v.sales)}</td><td class="r money owe">${money(v.comm)}</td></tr>`).join("")}
-    </tbody></table></div>`:"";
-
-  $("#content").innerHTML=`
-    <div class="toolbar">
-      <div class="seg">
+  return `<details class="panel money-details" id="money-details" ${moneyOpen?"open":""} style="margin-bottom:18px">
+    <summary>💵 Money details${outstanding>0?` <span class="money owe" style="font-size:13px">${money(outstanding)} outstanding</span>`:""}<span class="spacer"></span><span class="chev">▸</span></summary>
+    <div class="panel-pad" style="padding-top:6px">
+      <div class="toolbar" style="margin-bottom:12px"><div class="seg">
         ${["month","quarter","year","all"].map(p=>`<button data-mp="${p}" class="${moneyPeriod===p?"active":""}">${({month:"Month",quarter:"Quarter",year:"Year",all:"All time"})[p]}</button>`).join("")}
-      </div><span class="spacer"></span>
-    </div>
-    <div class="stats">
-      <div class="stat"><div class="ic green">💵</div><div class="label">Collected · ${label}</div><div class="num">${money(collected)}</div><div class="meta">this period</div></div>
-      <div class="stat"><div class="ic red">⏳</div><div class="label">Outstanding</div><div class="num">${money(outstanding)}</div><div class="meta">all unpaid balances</div></div>
-      <div class="stat"><div class="ic blue">✅</div><div class="label">Jobs done · ${label}</div><div class="num">${jobsDone}</div><div class="meta">completed</div></div>
-      <div class="stat"><div class="ic amber">💼</div><div class="label">Commissions · ${label}</div><div class="num">${money(commTotal)}</div><div class="meta">${closerRows.length?closerRows.length+" closer"+(closerRows.length!==1?"s":""):"none owed"}</div></div>
-    </div>
-    ${revenuePanel(12,250,"Revenue collected — last 12 months")}
-    <div class="grid-2">
-      <div class="panel"><h2>💳 Unpaid &amp; partial <span class="pill">${unpaid.length}</span><span class="spacer"></span><span class="money owe" style="font-size:14px">${money(outstanding)}</span></h2>
-        <div id="money-unpaid">${unpaid.length?`<table><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th class="r">Total</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead><tbody>${unpaid.map(moneyUnpaidRow).join("")}</tbody></table>`:`<div class="empty" style="padding:30px"><div class="big">🎉</div>No outstanding balances. Nice!</div>`}</div>
+      </div></div>
+      <div class="totbar" style="margin-bottom:14px">
+        <div class="totbox"><div class="l">Collected · ${label}</div><div class="n" style="color:var(--green)">${money(collected)}</div></div>
+        <div class="totbox"><div class="l">Outstanding</div><div class="n" style="color:${outstanding>0?"var(--red)":"var(--ink)"}">${money(outstanding)}</div></div>
+        <div class="totbox"><div class="l">Jobs done · ${label}</div><div class="n">${jobsDone}</div></div>
       </div>
-      <div class="col">
-        <div class="panel"><h2>📈 Revenue by service <span class="pill">${label}</span></h2><div class="panel-pad">${svcRows.length?svcRows.map(([s,v])=>`
-          <div style="margin-bottom:11px"><div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-bottom:4px"><span>${esc(s)}</span><span class="mono">${money(v)}</span></div>
-          <div style="height:8px;background:var(--gray-soft);border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.round(v/maxSvc*100)}%;background:var(--brand);border-radius:6px"></div></div></div>`).join(""):`<div class="empty" style="padding:20px">No revenue in this period yet.</div>`}</div></div>
-        ${commHtml}
-        <div class="panel"><h2>🧾 Recent payments</h2><div id="money-recent">${recentPays.length?`<table><tbody>${recentPays.map(moneyRecentRow).join("")}</tbody></table>`:`<div class="empty" style="padding:24px">No payments recorded yet.</div>`}</div></div>
-      </div>
-    </div>`;
-  document.querySelectorAll("[data-mp]").forEach(b=>b.onclick=()=>{moneyPeriod=b.dataset.mp;renderMoney();});
+      <div class="sec">💳 Unpaid &amp; partial (${unpaid.length})</div>
+      ${unpaid.length?`<table><thead><tr><th>Date</th><th>Customer</th><th class="r">Balance</th></tr></thead><tbody>${unpaid.map(moneyUnpaidRow).join("")}</tbody></table>`:`<div class="empty" style="padding:18px"><div class="big">🎉</div>No outstanding balances. Nice!</div>`}
+      <div class="sec" style="margin-top:16px">📈 Revenue by service · ${label}</div>
+      ${svcRows.length?svcRows.map(([s,v])=>`
+        <div style="margin-bottom:11px"><div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-bottom:4px"><span>${esc(s)}</span><span class="mono">${money(v)}</span></div>
+        <div style="height:8px;background:var(--gray-soft);border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.round(v/maxSvc*100)}%;background:var(--brand);border-radius:6px"></div></div></div>`).join(""):`<div class="empty" style="padding:16px">No revenue in this period yet.</div>`}
+      ${closerRows.length?`<div class="sec" style="margin-top:16px">💼 Commissions · ${label} — ${money(commTotal)} owed</div>
+        <table><tbody>${closerRows.map(([n,v])=>`<tr><td>${esc(n)}</td><td class="r mono">${v.count}</td><td class="r money pos">${money(v.sales)}</td><td class="r money owe">${money(v.comm)}</td></tr>`).join("")}</tbody></table>`:""}
+      <div class="sec" style="margin-top:16px">🧾 Recent payments</div>
+      ${recentPays.length?`<table><tbody>${recentPays.map(moneyRecentRow).join("")}</tbody></table>`:`<div class="empty" style="padding:16px">No payments recorded yet.</div>`}
+    </div></details>`;
+}
+function bindMoneyDetails(){
+  const d=$("#money-details"); if(!d)return;
+  d.addEventListener("toggle",()=>{moneyOpen=d.open;});
+  document.querySelectorAll("[data-mp]").forEach(b=>b.onclick=()=>{moneyPeriod=b.dataset.mp;moneyOpen=true;renderDashboard();});
   document.querySelectorAll("tr[data-job]").forEach(tr=>tr.onclick=()=>openJob(+tr.dataset.job,true));
-  bindChartTips();
 }
 function moneyUnpaidRow(j){const c=custById(j.customerId)||{name:"(deleted)"};
-  return `<tr class="clickable" data-job="${j.id}"><td>${fmtDateShort(j.date)}</td><td>${esc(c.name)}</td><td>${esc(j.service)}</td>
-    <td class="r mono">${money(j.price)}</td><td class="r mono">${money(j.collected)}</td><td class="r money owe">${money(jobBalance(j))}</td></tr>`;
+  return `<tr class="clickable" data-job="${j.id}"><td>${fmtDateShort(j.date)}</td>
+    <td><div class="nm" style="font-size:13px">${esc(c.name)}</div><div class="sub">${esc(j.service)}${+j.collected>0?" · paid "+money(j.collected):""}</div></td>
+    <td class="r money owe">${money(jobBalance(j))}</td></tr>`;
 }
 function moneyRecentRow(j){const c=custById(j.customerId)||{name:"(deleted)"};
   return `<tr class="clickable" data-job="${j.id}"><td style="width:70px">${fmtDateShort(j.date)}</td>
@@ -1016,13 +950,6 @@ function renderSettings(){
      <div class="col">
        <div class="panel"><h2>💬 Text templates <span class="spacer"></span><button class="btn sm btn-primary" id="tpl-add">＋ New</button></h2>
          <div class="panel-pad" id="tpl-list"></div></div>
-       <div class="panel"><h2>⚡ Auto-text helper (Twilio)</h2><div class="panel-pad">
-         <div class="note" style="margin-bottom:12px">Status: <b id="set-helper">checking…</b><br>
-           Instant + bulk texting needs the helper app running on this PC. Open the <b>sms-sender</b> folder and run <b>start.bat</b>.</div>
-         <div class="field"><label>Helper address</label><input id="set-url" value="${esc(s.helperUrl)}"></div>
-         <button class="btn" id="set-recheck">Re-check connection</button>
-         <div class="hint" style="margin-top:10px">Free click-to-text always works without this — it opens your messaging app pre-filled.</div>
-       </div></div>
        <div class="panel"><h2>🔄 Cloud sync (PC ⇄ phone)</h2><div class="panel-pad">
          <div class="note" style="margin-bottom:12px"><b>Status:</b> <span id="sync-state">…</span><br>
            Keeps your PC and phone on the same data automatically — every change uploads to a
@@ -1060,10 +987,6 @@ function renderSettings(){
   // templates
   renderTplList();
   $("#tpl-add").onclick=()=>{s.templates.push({id:"t"+Date.now(),name:"New template",body:"Hi {firstname}, "});save();renderTplList();};
-  // helper
-  $("#set-url").onchange=e=>{s.helperUrl=e.target.value.trim().replace(/\/+$/,"");save();checkHelper();};
-  $("#set-recheck").onclick=()=>{checkHelper();toast("Re-checking…");};
-  paintHelperSetting();
   // cloud sync
   $("#sync-key").value=syncToken();
   $("#sync-key").onchange=e=>{const v=e.target.value.trim();
@@ -1115,7 +1038,6 @@ function renderTplList(){
   el.querySelectorAll("[data-td]").forEach(b=>b.onclick=()=>{s.templates=s.templates.filter(x=>x.id!==b.dataset.td);save();renderTplList();});
   el.insertAdjacentHTML("beforeend",`<div class="hint" style="margin-top:6px">Variables: <b>{firstname} {name} {service} {date} {time} {address} {balance} {price} {business}</b> — filled per customer/job.</div>`);
 }
-function paintHelperSetting(){const sh=$("#set-helper");if(sh){sh.textContent=helperOnline?"● Connected — auto-send ready":"○ Not running";sh.style.color=helperOnline?"var(--green)":"var(--muted)";sh.style.fontWeight="700";}}
 
 /* ---------------- Customer modal ---------------- */
 function openCust(id){
@@ -1256,24 +1178,27 @@ function jobForm(j,cid){
     <div class="grid3">
       <div class="field"><label>Date</label><input id="jf-date" type="date" value="${j?esc(j.date):today()}"></div>
       <div class="field"><label>Time</label><input id="jf-time" type="time" value="${j?esc(j.time||""):"09:00"}"></div>
-      <div class="field"><label>Repeat</label><select id="jf-recur">${recurOpts}</select></div>
-    </div>
-    <div class="grid2">
       <div class="field"><label>Status</label><select id="jf-status">${statusOpts}</select></div>
-      <div class="field"><label>Crew / assigned to</label><input id="jf-crew" value="${j?esc(j.crew||""):""}"></div>
-    </div>
-    <div class="grid2">
-      <div class="field"><label>💼 Closed by (salesman)</label><input id="jf-closedby" value="${j?esc(j.closedBy||""):""}"></div>
-      <div class="field pre"><label>Commission %</label><span class="sym" style="top:33px">%</span><input id="jf-commission" type="number" min="0" max="100" value="${j&&j.commissionPct?j.commissionPct:""}" style="padding-left:24px"></div>
     </div>
     <div class="field"><label>Job notes</label><textarea id="jf-notes">${j?esc(j.notes||""):""}</textarea></div>
     <div class="sec">💵 Payment</div>
-    <div class="grid3">
+    <div class="grid2">
       <div class="field pre"><label>Collected</label><span class="sym" style="top:33px">$</span><input id="jf-collected" type="number" min="0" step="1" value="${j?(j.collected||""):""}"></div>
-      <div class="field"><label>Method</label><select id="jf-paymethod">${payOpts}</select></div>
       <div class="field"><label>&nbsp;</label><button class="btn" id="jf-payfull" style="width:100%">Mark paid in full</button></div>
     </div>
-    <div id="jf-balhint" class="hint"></div>`;
+    <div id="jf-balhint" class="hint"></div>
+    <details class="more-fields" ${j&&((j.recurring&&j.recurring!=="none")||j.crew||j.closedBy||j.commissionPct||j.payMethod)?"open":""}>
+      <summary>More — repeat, crew, salesman, pay method</summary>
+      <div class="grid2">
+        <div class="field"><label>Repeat</label><select id="jf-recur">${recurOpts}</select></div>
+        <div class="field"><label>Crew / assigned to</label><input id="jf-crew" value="${j?esc(j.crew||""):""}"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>💼 Closed by (salesman)</label><input id="jf-closedby" value="${j?esc(j.closedBy||""):""}"></div>
+        <div class="field pre"><label>Commission %</label><span class="sym" style="top:33px">%</span><input id="jf-commission" type="number" min="0" max="100" value="${j&&j.commissionPct?j.commissionPct:""}" style="padding-left:24px"></div>
+        <div class="field"><label>Pay method</label><select id="jf-paymethod">${payOpts}</select></div>
+      </div>
+    </details>`;
 }
 function bindJobForm(){
   const svc=$("#jf-service"),priceI=$("#jf-price");
@@ -1367,7 +1292,7 @@ function fillVars(text,c,j){
 function templateOptions(){return `<option value="">— blank —</option>`+db.settings.templates.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");}
 function openSms(c,j){
   if(!c){toast("No customer to text","err");return;}
-  smsCtx={c,j:j||null}; smsMode=helperOnline?smsMode:"app";
+  smsCtx={c,j:j||null};
   $("#sms-title").textContent="Text "+c.name;
   $("#sms-to").value=c.phone||"";
   $("#sms-template").innerHTML=templateOptions();
@@ -1376,110 +1301,37 @@ function openSms(c,j){
   applySmsTpl();
   $("#sms-vars").innerHTML=["{firstname}","{service}","{date}","{time}","{balance}"].map(v=>`<button class="chip" data-ins="${v}">${v}</button>`).join("");
   $("#sms-vars").querySelectorAll(".chip").forEach(b=>b.onclick=()=>insertAt($("#sms-body"),b.dataset.ins));
-  updateSmsMode();
+  $("#sms-send").textContent="📱 Open in app";
+  $("#sms-note").innerHTML=`Opens your messaging app with the text pre-filled — just press send.`;
   $("#sms-overlay").classList.add("show");
 }
 function applySmsTpl(){const t=db.settings.templates.find(x=>x.id===$("#sms-template").value);
   $("#sms-body").value=t?fillVars(t.body,smsCtx.c,smsCtx.j):"";updateCounter();}
 function updateCounter(){const len=$("#sms-body").value.length,seg=Math.max(1,Math.ceil(len/160));
-  $("#sms-counter").textContent=`${len} characters · ${seg} message${seg>1?"s":""}${smsMode==="auto"?` (~$${(seg*0.008).toFixed(3)})`:""}`;}
-function updateSmsMode(){$("#mode-auto").disabled=!helperOnline;if(!helperOnline)smsMode="app";
-  document.querySelectorAll("#send-mode button").forEach(b=>b.classList.toggle("active",b.dataset.mode===smsMode));
-  $("#sms-send").textContent=smsMode==="auto"?"⚡ Send now":"📱 Open in app";
-  $("#sms-note").innerHTML=smsMode==="auto"?`Sends instantly via your Twilio number (~$0.008 per segment).`
-    :(helperOnline?`Opens your Windows messaging app with the text pre-filled — just press send.`
-      :`Opens your Windows messaging app pre-filled — just press send. <b>Tip:</b> start the helper to enable instant + bulk auto-send.`);
-  updateCounter();}
-document.querySelectorAll("#send-mode button").forEach(b=>b.onclick=()=>{if(b.disabled)return;smsMode=b.dataset.mode;updateSmsMode();});
+  $("#sms-counter").textContent=`${len} characters · ${seg} message${seg>1?"s":""}`;}
 $("#sms-template").onchange=applySmsTpl;
 $("#sms-body").addEventListener("input",updateCounter);
 function closeSms(){$("#sms-overlay").classList.remove("show");smsCtx=null;}
 $("#sms-cancel").onclick=closeSms;$("#sms-close").onclick=closeSms;
 $("#sms-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#sms-overlay")))closeSms();});
-$("#sms-send").onclick=async()=>{
+$("#sms-send").onclick=()=>{
   const to=cleanNum($("#sms-to").value),body=$("#sms-body").value;
   if(!to){toast("Enter a phone number","err");return;}
   if(!body.trim()){toast("Message is empty","err");return;}
-  if(smsMode==="auto"){
-    $("#sms-send").disabled=true;$("#sms-send").textContent="Sending…";
-    const r=await sendViaHelper(to,body);$("#sms-send").disabled=false;updateSmsMode();
-    if(r.ok){logTextOnCust(smsCtx.c,body,"auto");toast("Text sent ✓","ok");closeSms();render();}
-    else toast("Send failed: "+r.error,"err");
-  }else{ window.location.href="sms:"+to+"?body="+encodeURIComponent(body); logTextOnCust(smsCtx.c,body,"app"); closeSms(); render(); }
+  window.location.href="sms:"+to+"?body="+encodeURIComponent(body); logTextOnCust(smsCtx.c,body); closeSms(); render();
 };
-function logTextOnCust(c,body,mode){if(!c)return;const cc=custById(c.id);if(!cc)return;
-  cc.log=cc.log||[];cc.log.push({t:Date.now(),m:(mode==="auto"?"📤 Texted (auto): ":"📱 Texted: ")+body});save();}
+function logTextOnCust(c,body){if(!c)return;const cc=custById(c.id);if(!cc)return;
+  cc.log=cc.log||[];cc.log.push({t:Date.now(),m:"📱 Texted: "+body});save();}
 function insertAt(ta,text){const s=ta.selectionStart,e=ta.selectionEnd;ta.value=ta.value.slice(0,s)+text+ta.value.slice(e);
   ta.selectionStart=ta.selectionEnd=s+text.length;ta.focus();updateCounter();}
 
-/* ---- Bulk text ---- */
-function openBulk(items,fromJobs){
-  // items: [{cust, job}]
-  bulkList=items.filter(x=>x.cust&&x.cust.phone); bulkCtxJob=!!fromJobs;
-  if(!bulkList.length){toast("No textable contacts","err");return;}
-  $("#bulk-title").textContent=`Text ${bulkList.length} ${fromJobs?"reminder"+(bulkList.length>1?"s":""):"contact"+(bulkList.length>1?"s":"")}`;
-  $("#bulk-template").innerHTML=templateOptions();
-  const def=db.settings.templates[0];$("#bulk-template").value=def?def.id:"";
-  $("#bulk-body").value=def?def.body:"";
-  $("#bulk-vars").innerHTML=["{firstname}","{service}","{date}","{time}","{balance}"].map(v=>`<button class="chip" data-ins="${v}">${v}</button>`).join("");
-  $("#bulk-vars").querySelectorAll(".chip").forEach(b=>b.onclick=()=>insertAt($("#bulk-body"),b.dataset.ins));
-  $("#bulk-progress").innerHTML="";bulkNote();$("#bulk-send").disabled=false;
-  $("#bulk-overlay").classList.add("show");
-}
-function bulkNote(){
-  if(helperOnline){const seg=Math.max(1,Math.ceil($("#bulk-body").value.length/160));const est=(bulkList.length*seg*0.008).toFixed(2);
-    $("#bulk-note").innerHTML=`⚡ Will auto-send <b>${bulkList.length}</b> texts via Twilio. Est. ~$${est}. Each message's details fill in automatically. <b>Only text people expecting to hear from you.</b>`;
-    $("#bulk-send").textContent="⚡ Send to all";$("#bulk-send").disabled=false;}
-  else{$("#bulk-note").innerHTML=`Auto-text helper isn't running, so bulk send is off. Start the helper (Settings) to enable it, or text people one at a time with the free 💬 button.`;
-    $("#bulk-send").textContent="Helper required";$("#bulk-send").disabled=true;}
-}
-$("#bulk-template").onchange=()=>{const t=db.settings.templates.find(x=>x.id===$("#bulk-template").value);$("#bulk-body").value=t?t.body:"";bulkNote();};
-$("#bulk-body").addEventListener("input",bulkNote);
-function closeBulk(){$("#bulk-overlay").classList.remove("show");}
-$("#bulk-cancel").onclick=closeBulk;$("#bulk-close").onclick=closeBulk;
-$("#bulk-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#bulk-overlay")))closeBulk();});
-$("#bulk-send").onclick=async()=>{
-  if(!helperOnline)return;
-  if(!confirm(`Send this text to ${bulkList.length} people now? This uses your Twilio account.`))return;
-  $("#bulk-send").disabled=true;$("#bulk-cancel").disabled=true;
-  const tmpl=$("#bulk-body").value;let ok=0,fail=0;
-  for(let i=0;i<bulkList.length;i++){const {cust,job}=bulkList[i];const body=fillVars(tmpl,cust,job);
-    $("#bulk-progress").innerHTML=`Sending ${i+1} / ${bulkList.length}…`;
-    const r=await sendViaHelper(cleanNum(cust.phone),body);if(r.ok){ok++;logTextOnCust(cust,body,"auto");}else fail++;}
-  $("#bulk-progress").innerHTML=`<b>Done.</b> ${ok} sent${fail?`, ${fail} failed`:""}.`;
-  $("#bulk-cancel").disabled=false;$("#bulk-cancel").textContent="Close";
-  toast(`Bulk text: ${ok} sent${fail?`, ${fail} failed`:""}`,fail?"err":"ok");render();
-};
 
-/* ---- Helper connection ---- */
-async function sendViaHelper(to,body){
-  try{const res=await fetch(db.settings.helperUrl+"/send",{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify({to,body})});
-    const data=await res.json().catch(()=>({}));
-    if(!res.ok||data.ok===false)return{ok:false,error:(data&&data.error)||("HTTP "+res.status)};
-    return{ok:true,sid:data.sid};
-  }catch(e){return{ok:false,error:"helper unreachable"};}
-}
-async function checkHelper(){
-  let on=false;
-  try{const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),1500);
-    const res=await fetch(db.settings.helperUrl+"/health",{signal:ctrl.signal});clearTimeout(t);on=res.ok;}catch(e){on=false;}
-  helperOnline=on;
-  $("#helper-status").className="helper-status "+(on?"on":"");
-  $("#helper-text").textContent=on?"Auto-text: connected":"Auto-text: off";
-  if($("#sms-overlay").classList.contains("show"))updateSmsMode();
-  if($("#bulk-overlay").classList.contains("show"))bulkNote();
-  if(view==="settings")paintHelperSetting();
-}
-
-/* ---------------- Nav / search / global ---------------- */
+/* ---------------- Nav / global ---------------- */
 document.querySelectorAll("#nav a,#bottombar a").forEach(a=>a.onclick=()=>{view=a.dataset.view;render();});
-$("#search").addEventListener("input",e=>{query=e.target.value;
-  if(view==="dashboard"||view==="money"||view==="settings")view="customers";
-  render();}); // #search lives in the fixed topbar, so it keeps focus & caret across renders — no refocus needed
 $("#add-job").onclick=()=>openJob(null);
-$("#add-cust").onclick=()=>openCust(null);
+$("#open-settings").onclick=()=>{view="settings";render();};
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape"){closePaste();closeSms();closeBulk();closeJob();closeCust();closeQuick();return;}
+  if(e.key==="Escape"){closePaste();closeSms();closeJob();closeCust();closeQuick();return;}
   // Ctrl/⌘+Enter saves whichever editor is open — job takes priority since it can stack over the customer modal
   if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){
     if($("#job-overlay").classList.contains("show")){e.preventDefault();saveJob();}
@@ -2114,7 +1966,6 @@ if(db.migrated){toast("Your previous contacts were imported ✓","ok");delete db
 if(__ownerJobs)setTimeout(()=>toast(`Auto-loaded ${__ownerJobs} client sale${__ownerJobs!==1?"s":""} you sent — marked done & paid ✓`,"ok"),700);
 if(__earn)setTimeout(()=>toast(`📥 Earnings synced: ${__earn.added} jobs added, ${__earn.updated} amounts corrected, ${__earn.newCust} new customers`,"ok"),1200);
 if(__cont)setTimeout(()=>toast(`📇 Contacts synced: ${__cont.attached} phones attached, ${__cont.created} added, ${__cont.dup} already in CRM${__cont.skipped.length?`, ${__cont.skipped.length} ambiguous (noted)`:""}`,"ok"),1900);
-checkHelper();setInterval(checkHelper,8000);
 initAutoBackup();setInterval(paintBackupChip,60000);
 syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
 // iOS home-screen app: guarantee the topbar clears the status bar / Dynamic Island,
