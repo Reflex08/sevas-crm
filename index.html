@@ -1243,9 +1243,17 @@ function completeJob(id){
   j.status="completed"; if(!j.completedAt)j.completedAt=Date.now();
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:`✓ Completed ${j.service} (${money(j.price)})`});}
-  if(j.recurring&&j.recurring!=="none")spawnNextRecurring(j);
+  // Repeating jobs NEVER re-book silently — the surprise clone read as "my job moved 6 months"
+  let extra="";
+  if(j.recurring&&j.recurring!=="none"){
+    const next=advanceDate(j.date,j.recurring);
+    const lbl=(RECUR.find(r=>r.id===j.recurring)||{}).label||j.recurring;
+    if(next&&confirm(`This job repeats (${lbl}). Book the next ${j.service} for ${fmtDate(next)}?`)){
+      spawnNextRecurring(j); extra=` · ↻ next booked ${fmtDateShort(next)}`;
+    }
+  }
   save();render();
-  toast(jobBalance(j)>0?`Job done — ${money(jobBalance(j))} still owed`:"Job completed ✓","ok");
+  toast((jobBalance(j)>0?`Job done — ${money(jobBalance(j))} still owed`:"Job completed ✓")+extra,"ok");
 }
 function spawnNextRecurring(j){
   const next=advanceDate(j.date,j.recurring); if(!next)return;
