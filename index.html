@@ -425,10 +425,6 @@ const JOB_STATUS=[
   {id:"cancelled",label:"Cancelled",cls:"b-cancelled"},
 ];
 const PAY_METHODS=["Cash","Card","Check","Venmo","Zelle","Other"];
-const RECUR=[
-  {id:"none",label:"One-time"},{id:"weekly",label:"Weekly"},{id:"biweekly",label:"Every 2 weeks"},
-  {id:"monthly",label:"Monthly"},{id:"quarterly",label:"Quarterly"},{id:"semiannual",label:"Every 6 months"},{id:"annual",label:"Yearly"},
-];
 const DEFAULT_SERVICES=[
   {name:"Window Cleaning",price:250},{name:"Gutter Cleaning",price:175},{name:"Pressure Washing",price:300},
   {name:"Soft Wash (House)",price:400},{name:"Roof Cleaning",price:550},{name:"Driveway / Concrete",price:200},
@@ -779,7 +775,6 @@ function jobCard(j,overdueFlag){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const st=JOB_STATUS.find(s=>s.id===j.status)||JOB_STATUS[0];
   const ps=payState(j); const bal=jobBalance(j);
-  const recur=RECUR.find(r=>r.id===j.recurring); const isRecur=j.recurring&&j.recurring!=="none";
   const barColor=j.status==="completed"?"var(--green)":(overdueFlag||j.date<today()&&j.status==="scheduled")?"var(--red)":"var(--brand)";
   const actions = j.status==="completed"
     ? `<button class="btn sm" data-editjob="${j.id}">Open</button>`
@@ -790,7 +785,6 @@ function jobCard(j,overdueFlag){
     <div class="body">
       <div class="l1"><span class="svc">${esc(j.service)}</span>
         ${money(j.price)!=="$0"?`<span class="money">${money(j.price)}</span>`:""}
-        ${isRecur?`<span class="recur">↻ ${recur.label}</span>`:""}
         ${bal>0?`<span class="badge b-${ps}">${money(bal)} due</span>`:""}
       </div>
       <div class="who">👤 ${esc(c.name)}${c.phone?` · <a href="tel:${esc(cleanNum(c.phone))}">${esc(fmtPhone(c.phone))}</a>`:""}${addr1(c)?` · 📍 <a href="${mapsUrl(c)}" target="_blank" rel="noopener">${esc(addrFull(c))}</a>`:""}</div>
@@ -1089,7 +1083,7 @@ function jobLine(j){
   const st=JOB_STATUS.find(s=>s.id===j.status);const bal=jobBalance(j);
   return `<div class="jobline" data-jl="${j.id}">
     <div class="jl-date">${fmtDateShort(j.date)}<br><span class="sub" style="font-weight:600">${fmtTime(j.time)||""}</span></div>
-    <div class="jl-svc">${esc(j.service)}<small>${money(j.price)} · ${st.label}${j.recurring&&j.recurring!=="none"?" · ↻":""}${j.closedBy?" · 💼 "+esc(j.closedBy):""}</small></div>
+    <div class="jl-svc">${esc(j.service)}<small>${money(j.price)} · ${st.label}${j.closedBy?" · 💼 "+esc(j.closedBy):""}</small></div>
     ${j.status!=="completed"?"":bal>0?`<span class="money owe">${money(bal)} due</span>`:`<span class="badge b-paid">paid</span>`}
   </div>`;
 }
@@ -1164,7 +1158,6 @@ function jobForm(j,cid){
     +`<option value="__custom" ${j&&!db.settings.services.some(s=>s.name===j.service)?"selected":""}>Other / custom…</option>`;
   const isCustom=j&&!db.settings.services.some(s=>s.name===j.service);
   const statusOpts=JOB_STATUS.map(s=>`<option value="${s.id}" ${j&&j.status===s.id?"selected":""}>${s.label}</option>`).join("");
-  const recurOpts=RECUR.map(r=>`<option value="${r.id}" ${j?(j.recurring===r.id?"selected":""):(r.id==="none"?"selected":"")}>${r.label}</option>`).join("");
   const payOpts=`<option value="">— method —</option>`+PAY_METHODS.map(p=>`<option ${j&&j.payMethod===p?"selected":""}>${p}</option>`).join("");
   const price=j?j.price:"";
   return `
@@ -1187,12 +1180,9 @@ function jobForm(j,cid){
       <div class="field"><label>&nbsp;</label><button class="btn" id="jf-payfull" style="width:100%">Mark paid in full</button></div>
     </div>
     <div id="jf-balhint" class="hint"></div>
-    <details class="more-fields" ${j&&((j.recurring&&j.recurring!=="none")||j.crew||j.closedBy||j.commissionPct||j.payMethod)?"open":""}>
-      <summary>More — repeat, crew, salesman, pay method</summary>
-      <div class="grid2">
-        <div class="field"><label>Repeat</label><select id="jf-recur">${recurOpts}</select></div>
-        <div class="field"><label>Crew / assigned to</label><input id="jf-crew" value="${j?esc(j.crew||""):""}"></div>
-      </div>
+    <details class="more-fields" ${j&&(j.crew||j.closedBy||j.commissionPct||j.payMethod)?"open":""}>
+      <summary>More — crew, salesman, pay method</summary>
+      <div class="field"><label>Crew / assigned to</label><input id="jf-crew" value="${j?esc(j.crew||""):""}"></div>
       <div class="grid3">
         <div class="field"><label>💼 Closed by (salesman)</label><input id="jf-closedby" value="${j?esc(j.closedBy||""):""}"></div>
         <div class="field pre"><label>Commission %</label><span class="sym" style="top:33px">%</span><input id="jf-commission" type="number" min="0" max="100" value="${j&&j.commissionPct?j.commissionPct:""}" style="padding-left:24px"></div>
@@ -1221,7 +1211,7 @@ function updateBalHint(){const p=+$("#jf-price").value||0,c=+$("#jf-collected").
 function gatherJob(){
   let service=$("#jf-service").value; if(service==="__custom")service=$("#jf-customsvc").value.trim()||"Custom service";
   return {customerId:+$("#jf-cust").value||null,service,price:+$("#jf-price").value||0,
-    date:$("#jf-date").value||today(),time:$("#jf-time").value||"",recurring:$("#jf-recur").value,
+    date:$("#jf-date").value||today(),time:$("#jf-time").value||"",recurring:"none",
     status:$("#jf-status").value,crew:$("#jf-crew").value.trim(),closedBy:$("#jf-closedby").value.trim(),commissionPct:+$("#jf-commission").value||0,notes:$("#jf-notes").value.trim(),
     collected:+$("#jf-collected").value||0,payMethod:$("#jf-paymethod").value};
 }
@@ -1232,8 +1222,6 @@ function saveJob(){
   if(editJob){j=db.jobs.find(x=>x.id===editJob);wasCompleted=j.status==="completed";Object.assign(j,data);}
   else{j=Object.assign({id:db.seqJ++,created:Date.now(),completedAt:0},data);db.jobs.push(j);}
   if(j.status==="completed"&&!j.completedAt)j.completedAt=Date.now();
-  // recurring roll-forward when newly completed
-  if(j.status==="completed"&&!wasCompleted&&j.recurring&&j.recurring!=="none") spawnNextRecurring(j);
   save(); closeJob();
   if($("#cust-overlay").classList.contains("show")&&editCust)openCust(editCust);
   render(); toast("Job saved","ok");
@@ -1243,33 +1231,10 @@ function completeJob(id){
   j.status="completed"; if(!j.completedAt)j.completedAt=Date.now();
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:`✓ Completed ${j.service} (${money(j.price)})`});}
-  // Repeating jobs NEVER re-book silently — the surprise clone read as "my job moved 6 months"
-  let extra="";
-  if(j.recurring&&j.recurring!=="none"){
-    const next=advanceDate(j.date,j.recurring);
-    const lbl=(RECUR.find(r=>r.id===j.recurring)||{}).label||j.recurring;
-    if(next&&confirm(`This job repeats (${lbl}). Book the next ${j.service} for ${fmtDate(next)}?`)){
-      spawnNextRecurring(j); extra=` · ↻ next booked ${fmtDateShort(next)}`;
-    }
-  }
+  // Done = done. Nothing gets re-booked, ever — the owner books the next visit himself.
   save();render();
-  toast((jobBalance(j)>0?`Job done — ${money(jobBalance(j))} still owed`:"Job completed ✓")+extra,"ok");
+  toast(jobBalance(j)>0?`Job done — ${money(jobBalance(j))} still owed`:"Job completed ✓","ok");
 }
-function spawnNextRecurring(j){
-  const next=advanceDate(j.date,j.recurring); if(!next)return;
-  const copy=Object.assign({},j,{id:db.seqJ++,date:next,status:"scheduled",collected:0,payMethod:"",completedAt:0,created:Date.now()});
-  db.jobs.push(copy);
-  const c=custById(j.customerId); if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:`↻ Auto-booked next ${j.service} for ${fmtDate(next)}`});}
-}
-function advanceDate(d,rec){const x=new Date(d+"T00:00:00");if(isNaN(x))return"";
-  const add={weekly:7,biweekly:14};
-  if(add[rec]){x.setDate(x.getDate()+add[rec]);}
-  else if(rec==="monthly")x.setMonth(x.getMonth()+1);
-  else if(rec==="quarterly")x.setMonth(x.getMonth()+3);
-  else if(rec==="semiannual")x.setMonth(x.getMonth()+6);
-  else if(rec==="annual")x.setFullYear(x.getFullYear()+1);
-  else return"";
-  return x.toISOString().slice(0,10);}
 function closeJob(){$("#job-overlay").classList.remove("show");editJob=null;}
 $("#job-save").onclick=saveJob;
 $("#job-cancel").onclick=closeJob;
@@ -1953,6 +1918,24 @@ if(!db.leadsPurged){
   const leadIds=db.customers.filter(c=>c.status==="lead").map(c=>c.id);
   if(leadIds.length){db.jobs=db.jobs.filter(j=>!leadIds.includes(j.customerId));db.customers=db.customers.filter(c=>c.status!=="lead");}
   db.leadsPurged=true; save();
+}
+// One-time cleanup: the old auto-rebook feature quietly cloned repeating jobs forward when
+// marked Done. Owner killed the feature ("I'll book it myself") — delete the ghost bookings:
+// scheduled, never-paid clones sitting exactly one repeat-interval after a completed twin.
+function purgeAutoRebooks(){
+  const adv=(d,rec)=>{const mo={monthly:1,quarterly:3,semiannual:6,annual:12},dy={weekly:7,biweekly:14};
+    if(!mo[rec]&&!dy[rec])return"";const x=new Date(d+"T00:00:00");if(isNaN(x))return"";
+    if(mo[rec])x.setMonth(x.getMonth()+mo[rec]); else x.setDate(x.getDate()+dy[rec]);
+    return x.toISOString().slice(0,10);};
+  const doomed=db.jobs.filter(j=>j.status==="scheduled"&&j.recurring&&j.recurring!=="none"&&!(+j.collected)&&
+    db.jobs.some(o=>o.id!==j.id&&o.customerId===j.customerId&&o.service===j.service&&o.status==="completed"&&adv(o.date,j.recurring)===j.date));
+  if(doomed.length){const ids=new Set(doomed.map(j=>j.id));db.jobs=db.jobs.filter(j=>!ids.has(j.id));}
+  db.jobs.forEach(j=>{if(j.recurring&&j.recurring!=="none")j.recurring="none";}); // flags are dead now
+  return doomed.length;
+}
+if(!db.recurPurged){
+  const n=purgeAutoRebooks(); db.recurPurged=true; save();
+  if(n)setTimeout(()=>toast(`Removed ${n} auto-booked repeat job${n>1?"s":""} — Done never re-books anymore`,"ok"),700);
 }
 let __ownerJobs=0;
 if((db.ownerImport||0)<OWNER_IMPORT.version){
