@@ -1937,6 +1937,27 @@ if(!db.recurPurged){
   const n=purgeAutoRebooks(); db.recurPurged=true; save();
   if(n)setTimeout(()=>toast(`Removed ${n} auto-booked repeat job${n>1?"s":""} — Done never re-books anymore`,"ok"),700);
 }
+// Round 2: pressing Done on the clones COMPLETED them, so round 1 (which only looked at
+// scheduled ones) missed the chain. Two safe fingerprints, real work can't match either:
+//  a) "completed" but dated in the FUTURE with $0 collected (you can't have done work that
+//     hasn't happened) — needs an older same-customer/same-service job as its ancestor;
+//  b) $0-collected job whose created-timestamp equals (±5s) the moment ANOTHER job of the
+//     same customer+service was marked Done — the auto-spawner's exact signature.
+function purgeAutoRebooks2(){
+  const t=today();
+  const doomed=db.jobs.filter(j=>!(+j.collected)&&(
+    (j.status==="completed"&&j.date>t&&
+      db.jobs.some(o=>o.id!==j.id&&o.customerId===j.customerId&&o.service===j.service&&o.date<j.date))||
+    db.jobs.some(o=>o.id!==j.id&&o.customerId===j.customerId&&o.service===j.service&&
+      o.completedAt&&j.created&&Math.abs(j.created-o.completedAt)<5000&&(j.created-(o.created||0))>60000)
+  ));
+  if(doomed.length){const ids=new Set(doomed.map(j=>j.id));db.jobs=db.jobs.filter(j=>!ids.has(j.id));}
+  return doomed.length;
+}
+if(!db.recurPurged2){
+  const n2=purgeAutoRebooks2(); db.recurPurged2=true; save();
+  if(n2)setTimeout(()=>toast(`Removed ${n2} repeat-clone job${n2>1?"s":""} 🧹`,"ok"),900);
+}
 let __ownerJobs=0;
 if((db.ownerImport||0)<OWNER_IMPORT.version){
   __ownerJobs=importOwnerData();
