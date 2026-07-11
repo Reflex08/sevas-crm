@@ -1229,11 +1229,15 @@ function saveJob(){
 function completeJob(id){
   const j=db.jobs.find(x=>x.id===id);if(!j)return;
   j.status="completed"; if(!j.completedAt)j.completedAt=Date.now();
-  const c=custById(j.customerId);
-  if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:`✓ Completed ${j.service} (${money(j.price)})`});}
   // Done = done. Nothing gets re-booked, ever — the owner books the next visit himself.
+  // But money gets settled right here: paid jobs must never sit in Outstanding.
+  const owed=Math.max(0,(+j.price||0)-(+j.collected||0));
+  const paidNow=owed>0&&confirm(`Did you collect ${money(owed)}${+j.collected?" (the rest)":""} for this ${j.service}?\n\nOK = paid · Cancel = still owed`);
+  if(paidNow)j.collected=+j.price||0;
+  const c=custById(j.customerId);
+  if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:`✓ Completed ${j.service} (${money(j.price)})${jobBalance(j)>0?" — unpaid":""}`});}
   save();render();
-  toast(jobBalance(j)>0?`Job done — ${money(jobBalance(j))} still owed`:"Job completed ✓","ok");
+  toast(jobBalance(j)>0?`Job done — ${money(jobBalance(j))} marked outstanding`:"Job done — paid ✓","ok");
 }
 function closeJob(){$("#job-overlay").classList.remove("show");editJob=null;}
 $("#job-save").onclick=saveJob;
