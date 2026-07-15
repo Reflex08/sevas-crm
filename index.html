@@ -479,8 +479,11 @@ function seed(){
   // Start clean — real data comes from the owner auto-import + your own entries.
   return normalize({customers:[],jobs:[],settings:DEFAULT_SETTINGS(),seqC:1,seqJ:1});
 }
-function offset(n){const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
-function today(){return new Date().toISOString().slice(0,10);}
+/* LOCAL calendar date — never toISOString(), which is UTC and rolls to "tomorrow" every
+   evening (Toronto UTC-4/5): typed at 8pm Jul 14, the app thought it was Jul 15. */
+function localISO(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function offset(n){const d=new Date();d.setDate(d.getDate()+n);return localISO(d);}
+function today(){return localISO(new Date());}
 /* Small UI-preference store — kept out of `db` so it never triggers the backup loop. */
 function uiPref(){try{return JSON.parse(localStorage.getItem("servicepro.ui"))||{};}catch(e){return{};}}
 function uiSet(p){localStorage.setItem("servicepro.ui",JSON.stringify(Object.assign(uiPref(),p)));}
@@ -607,7 +610,7 @@ function bindChartTips(){
 }
 /* Revenue collected, bucketed to the chosen period. Returns {series,total,title}. */
 function revenueSeries(period){
-  const now=new Date(); const iso=d=>d.toISOString().slice(0,10);
+  const now=new Date(); const iso=localISO;
   const sumRange=(from,to)=>db.jobs.filter(j=>j.status!=="cancelled"&&j.date>=from&&j.date<=to).reduce((s,j)=>s+(+j.collected||0),0);
   const daily=days=>{const out=[];for(let i=days-1;i>=0;i--){const d=new Date(now);d.setHours(0,0,0,0);d.setDate(d.getDate()-i);
     const ds=iso(d);out.push({label:(d.getMonth()+1)+"/"+d.getDate(),value:sumRange(ds,ds)});}return out;};
@@ -1160,9 +1163,12 @@ function jobForm(j,cid){
   const statusOpts=JOB_STATUS.map(s=>`<option value="${s.id}" ${j&&j.status===s.id?"selected":""}>${s.label}</option>`).join("");
   const payOpts=`<option value="">— method —</option>`+PAY_METHODS.map(p=>`<option ${j&&j.payMethod===p?"selected":""}>${p}</option>`).join("");
   const price=j?j.price:"";
+  const cc=cid?custById(cid):null;
   return `
     <div class="field"><label>Customer *</label><select id="jf-cust">${custOpts}</select>
       <div class="hint">Not in the list? <span style="color:var(--brand);cursor:pointer;font-weight:700" id="jf-newcust">＋ Add a new customer first</span></div></div>
+    <div class="field"><label>Address</label><input id="jf-address" value="${cc?esc(cc.street||""):""}">
+      <div class="hint">Saved on the customer's card — edits here update it everywhere.</div></div>
     <div class="grid2">
       <div class="field"><label>Service</label><select id="jf-service">${svcOpts}</select></div>
       <div class="field" id="jf-customwrap" style="${isCustom?"":"display:none"}"><label>Custom service name</label><input id="jf-customsvc" value="${isCustom?esc(j.service):""}"></div>
@@ -1199,6 +1205,7 @@ function bindJobForm(){
     fillDefault(); // fills the service's default price only when the box is empty — never wipes a price you typed
   };
   if(editJob===null)fillDefault(); // brand-new job opens pre-filled with the service's default price
+  $("#jf-cust").onchange=()=>{const c=custById(+$("#jf-cust").value);$("#jf-address").value=c?(c.street||""):"";};
   $("#jf-payfull").onclick=()=>{const p=+priceI.value||0;$("#jf-collected").value=p;updateBalHint();};
   [priceI,$("#jf-collected")].forEach(i=>i.addEventListener("input",updateBalHint));
   $("#jf-newcust").onclick=()=>{closeJob();openCust(null);};
@@ -1218,6 +1225,8 @@ function gatherJob(){
 function saveJob(){
   const data=gatherJob();
   if(!data.customerId){toast("Pick a customer for this job","err");$("#jf-cust").focus();return;}
+  const cAddr=custById(data.customerId); // address box edits the customer's card (add / change / clear)
+  if(cAddr){const a=$("#jf-address").value.trim();if(a!==(cAddr.street||""))cAddr.street=a;}
   let wasCompleted=false, j;
   if(editJob){j=db.jobs.find(x=>x.id===editJob);wasCompleted=j.status==="completed";Object.assign(j,data);}
   else{j=Object.assign({id:db.seqJ++,created:Date.now(),completedAt:0},data);db.jobs.push(j);}
@@ -1740,13 +1749,13 @@ function quickParseLine(line){
     if(ap==="pm"&&h<12)h+=12; else if(ap==="am"&&h===12)h=0; else if(!ap&&h>=1&&h<8)h+=12; // bare 1–7 = afternoon
     out.time=String(h).padStart(2,"0")+":"+(m[2]||"00");out.job=true;}
   if(eat(/\b(?:today|tonight)\b/i)){out.date=today();out.job=true;}
-  else if(eat(/\b(?:tomorrow|tmrw|tmr)\b/i)){out.date=offset(1);out.job=true;}
+  else if(eat(/\b(?:tomm?orr?ow|tomorow|tmrw|tmr|tmw)\b/i)){out.date=offset(1);out.job=true;} // misspellings must not silently become "today, done & paid"
   else if(eat(/\byesterday\b/i)){out.date=offset(-1);out.job=true;}
   else{
     const wd=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
     m=eat(new RegExp("\\b(?:next\\s+|this\\s+)?("+wd.join("|")+")\\b","i"));
     if(m){const want=wd.indexOf(m[1].toLowerCase()),d=new Date();
-      d.setDate(d.getDate()+((want-d.getDay()+7)%7));out.date=d.toISOString().slice(0,10);out.job=true;}
+      d.setDate(d.getDate()+((want-d.getDay()+7)%7));out.date=localISO(d);out.job=true;}
     else{m=eat(/\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i);
       if(m){const d=parseLooseDate(m[1]);if(d){out.date=d;out.job=true;}}}
   }
