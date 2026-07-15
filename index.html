@@ -491,7 +491,7 @@ function uiSet(p){localStorage.setItem("servicepro.ui",JSON.stringify(Object.ass
 /* ---------------- State ---------------- */
 let view="dashboard",query="",custFilter="all",custSort="name-asc",schedFilter="upcoming",moneyPeriod="month";
 let dashRevPeriod=uiPref().revPeriod||"month"; // chart style: smooth area, everywhere (bars/line retired)
-let editCust=null,editJob=null,draftLog=[],smsCtx=null;
+let editCust=null,editJob=null,draftLog=[],smsCtx=null,jobDraft=null;
 
 /* ---------------- Utils ---------------- */
 const $=s=>document.querySelector(s);
@@ -1121,9 +1121,25 @@ function persistCustEdits(){ // save without closing (used before opening a job)
 }
 function saveCust(){
   if(!$("#cf-name").value.trim()){toast("Please enter a name","err");$("#cf-name").focus();return;}
-  persistCustEdits(); closeCust(); render(); toast("Customer saved","ok");
+  persistCustEdits();
+  const cid=editCust, d=jobDraft; jobDraft=null;
+  closeCust(); render();
+  if(d){restoreJobDraft(d,cid);toast("Customer saved — job filled back in","ok");}
+  else toast("Customer saved","ok");
 }
-function closeCust(){$("#cust-overlay").classList.remove("show");editCust=null;}
+function restoreJobDraft(d,cid){ // came from "＋ Add a new customer first" — give back the half-typed job
+  openJob(null,false,cid);
+  const svcSel=$("#jf-service");
+  const has=[...(svcSel.options||[])].some(o=>o.value===d.service);
+  if(has)svcSel.value=d.service;
+  else if(d.service){svcSel.value="__custom";$("#jf-customwrap").style.display="";$("#jf-customsvc").value=d.service;}
+  $("#jf-price").value=d.price||"";$("#jf-date").value=d.date||today();$("#jf-time").value=d.time||"";
+  $("#jf-status").value=d.status||"scheduled";$("#jf-notes").value=d.notes||"";
+  $("#jf-collected").value=d.collected||"";$("#jf-crew").value=d.crew||"";
+  $("#jf-closedby").value=d.closedBy||"";$("#jf-commission").value=d.commissionPct||"";$("#jf-paymethod").value=d.payMethod||"";
+  updateBalHint();
+}
+function closeCust(){$("#cust-overlay").classList.remove("show");editCust=null;jobDraft=null;}
 $("#cust-save").onclick=saveCust;
 $("#cust-cancel").onclick=closeCust;
 $("#cust-close").onclick=closeCust;
@@ -1208,7 +1224,11 @@ function bindJobForm(){
   $("#jf-cust").onchange=()=>{const c=custById(+$("#jf-cust").value);$("#jf-address").value=c?(c.street||""):"";};
   $("#jf-payfull").onclick=()=>{const p=+priceI.value||0;$("#jf-collected").value=p;updateBalHint();};
   [priceI,$("#jf-collected")].forEach(i=>i.addEventListener("input",updateBalHint));
-  $("#jf-newcust").onclick=()=>{closeJob();openCust(null);};
+  $("#jf-newcust").onclick=()=>{ // keep everything already typed — restored after the customer is saved
+    jobDraft=gatherJob(); jobDraft.address=$("#jf-address").value.trim();
+    closeJob(); openCust(null);
+    if(jobDraft.address)$("#cf-street").value=jobDraft.address;
+  };
   updateBalHint();
 }
 function updateBalHint(){const p=+$("#jf-price").value||0,c=+$("#jf-collected").value||0;const bal=Math.max(0,p-c);
