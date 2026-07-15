@@ -1761,26 +1761,35 @@ const QA_SERVICES=[["gutter","Gutter Cleaning"],["soffit","Soffit Cleaning"],["p
   ["driveway","Driveway / Concrete"],["concrete","Driveway / Concrete"],["screen","Screen Repair"],["window","Window Cleaning"]];
 function quickParseLine(line){
   let s=(line||"").trim(); if(!s)return null;
-  const out={name:"",phone:"",address:"",price:0,notes:"",date:"",time:"",service:"",job:false,items:[]};
+  const out={name:"",phone:"",address:"",price:0,notes:"",date:"",time:"",service:"",job:false,items:[],dateGiven:false,past:false};
   const eat=re=>{const m=s.match(re);if(m)s=s.replace(m[0]," ");return m;};
   let m=eat(/(\+?1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/); if(m)out.phone=cleanNum(m[0]);
-  m=eat(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i)||eat(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  // A time needs am/pm, ":MM", or a plain 1–12 — "at 49 Burnwood" is an ADDRESS and must not be eaten
+  const scanTime=re=>{const g=new RegExp(re.source,"ig");let mm;
+    while((mm=g.exec(s))){const h=+mm[1];
+      if(h>23||(mm[2]&&+mm[2]>59))continue;
+      if(!mm[3]&&!mm[2]&&(h<1||h>12))continue;
+      s=s.replace(mm[0]," ");return mm;}
+    return null;};
+  m=scanTime(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/)||scanTime(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
   if(m){let h=+m[1];const ap=(m[3]||"").toLowerCase();
     if(ap==="pm"&&h<12)h+=12; else if(ap==="am"&&h===12)h=0; else if(!ap&&h>=1&&h<8)h+=12; // bare 1–7 = afternoon
     out.time=String(h).padStart(2,"0")+":"+(m[2]||"00");out.job=true;}
-  if(eat(/\b(?:today|tonight)\b/i)){out.date=today();out.job=true;}
-  else if(eat(/\b(?:tomm?orr?ow|tomorow|tmrw|tmr|tmw)\b/i)){out.date=offset(1);out.job=true;} // misspellings must not silently become "today, done & paid"
-  else if(eat(/\byesterday\b/i)){out.date=offset(-1);out.job=true;}
+  if(eat(/\b(?:today|tonight)\b/i)){out.date=today();out.job=true;out.dateGiven=true;}
+  else if(eat(/\b(?:tomm?orr?ow|tomorow|tmrw|tmr|tmw)\b/i)){out.date=offset(1);out.job=true;out.dateGiven=true;} // misspellings must not silently become "today, done & paid"
+  else if(eat(/\byesterday\b/i)){out.date=offset(-1);out.job=true;out.dateGiven=true;out.past=true;}
   else{
     const wd=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
     m=eat(new RegExp("\\b(?:next\\s+|this\\s+)?("+wd.join("|")+")\\b","i"));
     if(m){const want=wd.indexOf(m[1].toLowerCase()),d=new Date();
-      d.setDate(d.getDate()+((want-d.getDay()+7)%7));out.date=localISO(d);out.job=true;}
+      d.setDate(d.getDate()+((want-d.getDay()+7)%7));out.date=localISO(d);out.job=true;out.dateGiven=true;}
     else{m=eat(/\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i);
-      if(m){const d=parseLooseDate(m[1]);if(d){out.date=d;out.job=true;}}}
+      if(m){const d=parseLooseDate(m[1]);if(d){out.date=d;out.job=true;out.dateGiven=true;}}}
   }
-  if(/\b(did|done|finished|completed|washed|cleaned|scheduled|booked|logged|had)\b/i.test(s)){out.job=true;
-    s=s.replace(/\b(did|done|finished|completed|washed|cleaned|scheduled|booked|logged|had)\b/ig," ");}
+  if(/\b(did|done|finished|completed|washed|cleaned|logged|had)\b/i.test(s)){out.job=true;out.past=true;
+    s=s.replace(/\b(did|done|finished|completed|washed|cleaned|logged|had)\b/ig," ");}
+  if(/\b(scheduled|booked)\b/i.test(s)){out.job=true;
+    s=s.replace(/\b(scheduled|booked)\b/ig," ");}
   if(eat(/\bexterior\b/i))out.notes="exterior"; else if(eat(/\binterior\b/i))out.notes="interior";
   // Each comma/"and" chunk can carry its own service + price: "Judy today 249 windows, 149 gutters" = 2 jobs.
   const rests=[];
@@ -1789,7 +1798,7 @@ function quickParseLine(line){
     let mm=t.match(/\$\s?(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s?\$/);
     if(mm){price=+(mm[1]||mm[2])||0;t=t.replace(mm[0]," ");}
     if(!price){mm=t.match(/\b(?:for|paid|collected|charged|quoted)\s+\$?(\d{2,5}(?:\.\d{1,2})?)\b/i);
-      if(mm){price=+mm[1];paid=true;t=t.replace(mm[0]," ");}} // "for 249" / "paid 249" = money talk, this is a job
+      if(mm){price=+mm[1];paid=true;if(/paid|collected|charged/i.test(mm[0]))out.past=true;t=t.replace(mm[0]," ");}} // "paid 249" = already happened
     for(const[kw,svc]of QA_SERVICES){const re=new RegExp("\\b"+kw.replace(" ","\\s+")+"[a-z]*\\b","i");
       if(re.test(t)){service=svc;
         if(!price){ // bare number touching the service word is its price: "249 windows" / "windows 249"
@@ -1798,7 +1807,7 @@ function quickParseLine(line){
           if(m2&&+(m2[1]||m2[2])>=20){price=+(m2[1]||m2[2]);t=t.replace(m2[0]," ");}
         }
         t=t.replace(re," ");break;}}
-    if(price||service){out.items.push({service,price});if(paid||service)out.job=true;}
+    if(price||service){out.items.push({service,price});out.job=true;} // a price means a booking, not just a note on a lead
     rests.push(t);
   }
   s=rests.join(" ");
@@ -1815,6 +1824,10 @@ function quickParseLine(line){
     if(!out.items.length)out.items.push({service:"",price:0});
     for(const it of out.items)if(!it.service)it.service="Window Cleaning";
     if(!out.date)out.date=today();
+    if(!out.items[0].price){ // trailing lone number = the price: "sergey 49 burnwood 3:30pm 349"
+      const mt=out.address.match(/(?:^|\s)(\d{2,5})$/);
+      if(mt&&+mt[1]>=20){out.items[0].price=+mt[1];out.address=out.address.slice(0,mt.index).trim();}
+    }
   }
   out.price=out.items.length?out.items[0].price:0;
   out.service=out.items.length?out.items[0].service:"";
@@ -1857,7 +1870,9 @@ function quickCommit(rows,status){
     else{if(r.address&&!c.street)c.street=r.address;if(r.phone&&!cleanNum(c.phone))c.phone=r.phone;
       if(note)c.notes=c.notes?(c.notes+"\n"+note):note;updated++;}
     if(r.job){
-      const done=r.date<=today();
+      // completed & paid ONLY on an explicit past/now signal ("today", "yesterday", "did", "paid") —
+      // a price alone books an upcoming job, it never invents collected money
+      const done=r.date<=today()&&(r.past||r.dateGiven);
       const items=(r.items&&r.items.length)?r.items:[{service:r.service,price:r.price}];
       for(const it of items){
         db.jobs.push({id:db.seqJ++,customerId:c.id,service:it.service,price:it.price||0,date:r.date,time:r.time||"",
@@ -1888,7 +1903,7 @@ function qaPaintPreview(){
     const who=`${esc(r.name)}${known?` <span class="badge b-active" style="font-size:10.5px">known client</span>`:""}`;
     const its=(r.items&&r.items.length)?r.items:[{service:r.service,price:r.price}];
     const sub=r.job
-      ?`${its.map(it=>esc(it.service)+(it.price?" "+money(it.price):"")).join(" + ")} · ${fmtDateShort(r.date)}${r.time?" "+fmtTime(r.time):""} · ${r.date<=today()?"✓ done &amp; paid":"📅 booked"}${r.notes?" · "+esc(r.notes):""}`
+      ?`${its.map(it=>esc(it.service)+(it.price?" "+money(it.price):"")).join(" + ")} · ${fmtDateShort(r.date)}${r.time?" "+fmtTime(r.time):""} · ${r.date<=today()&&(r.past||r.dateGiven)?"✓ done &amp; paid":"📅 booked"}${r.notes?" · "+esc(r.notes):""}`
       :`${esc(fmtPhone(r.phone)||"no phone")} · ${esc(r.address||"no address")}${r.price?" · quoted "+money(r.price):""}`;
     return `<div class="jobline" style="cursor:default">
     <div class="avatar" style="background:${avatarColor(r.name)};width:32px;height:32px;font-size:12px">${esc(initials(r.name))}</div>
