@@ -491,7 +491,7 @@ function uiSet(p){localStorage.setItem("servicepro.ui",JSON.stringify(Object.ass
 /* ---------------- State ---------------- */
 let view="dashboard",query="",custFilter="all",custSort="name-asc",schedFilter="upcoming",moneyPeriod="month";
 let dashRevPeriod=uiPref().revPeriod||"month"; // chart style: smooth area, everywhere (bars/line retired)
-let editCust=null,editJob=null,draftLog=[],smsCtx=null,jobDraft=null;
+let editCust=null,editJob=null,draftLog=[],smsCtx=null,jobDraft=null,jobDirty=false,custDirty=false;
 
 /* ---------------- Utils ---------------- */
 const $=s=>document.querySelector(s);
@@ -1038,7 +1038,7 @@ function renderTplList(){
 
 /* ---------------- Customer modal ---------------- */
 function openCust(id){
-  editCust=id; const c=id?custById(id):null;
+  editCust=id; custDirty=false; const c=id?custById(id):null;
   $("#cust-title").textContent=c?c.name:"New Customer";
   $("#cust-hsub").textContent=c?(addrFull(c)||""):"";
   $("#cust-delete").style.display=c?"inline-block":"none";
@@ -1123,12 +1123,12 @@ function saveCust(){
   if(!$("#cf-name").value.trim()){toast("Please enter a name","err");$("#cf-name").focus();return;}
   persistCustEdits();
   const cid=editCust, d=jobDraft; jobDraft=null;
-  closeCust(); render();
+  dismissCust(); render();
   if(d){restoreJobDraft(d,cid);toast("Customer saved — job filled back in","ok");}
   else toast("Customer saved","ok");
 }
 function restoreJobDraft(d,cid){ // came from "＋ Add a new customer first" — give back the half-typed job
-  openJob(null,false,cid);
+  openJob(null,false,cid); jobDirty=true; // restored draft counts as typed — clicking out saves it
   const svcSel=$("#jf-service");
   const has=[...(svcSel.options||[])].some(o=>o.value===d.service);
   if(has)svcSel.value=d.service;
@@ -1139,15 +1139,22 @@ function restoreJobDraft(d,cid){ // came from "＋ Add a new customer first" —
   $("#jf-closedby").value=d.closedBy||"";$("#jf-commission").value=d.commissionPct||"";$("#jf-paymethod").value=d.payMethod||"";
   updateBalHint();
 }
-function closeCust(){$("#cust-overlay").classList.remove("show");editCust=null;jobDraft=null;}
+function dismissCust(){$("#cust-overlay").classList.remove("show");editCust=null;jobDraft=null;}
+// Clicking out of the modal SAVES (owner: no scrolling to the Save button). Untouched = just closes.
+function closeCust(){
+  if(!$("#cust-overlay").classList.contains("show"))return;
+  if(custDirty&&$("#cf-name").value.trim())saveCust(); else dismissCust();
+}
+["input","change"].forEach(ev=>$("#cust-body").addEventListener(ev,()=>{custDirty=true;}));
+["input","change"].forEach(ev=>$("#job-body").addEventListener(ev,()=>{jobDirty=true;}));
 $("#cust-save").onclick=saveCust;
-$("#cust-cancel").onclick=closeCust;
+$("#cust-cancel").onclick=dismissCust; // Cancel = the one explicit "throw my edits away"
 $("#cust-close").onclick=closeCust;
 $("#cust-delete").onclick=()=>{const c=custById(editCust);if(!c)return;
   const n=custJobs(c.id).length;
   if(!confirm(`Delete "${c.name}"${n?` and their ${n} job(s)`:""}? This can't be undone.`))return;
   db.jobs=db.jobs.filter(j=>j.customerId!==c.id);db.customers=db.customers.filter(x=>x.id!==c.id);
-  save();closeCust();render();toast("Customer deleted");};
+  save();dismissCust();render();toast("Customer deleted");};
 $("#cust-text").onclick=()=>{const c=custById(editCust);persistCustEdits();const j=custNext(editCust)||custLast(editCust);openSms(c,j);};
 $("#cust-addjob").onclick=()=>{if(persistCustEdits())openJob(null,false,editCust);};
 // A tap closes a modal only if it STARTED on the backdrop — a scroll drag that ends past the
@@ -1159,7 +1166,7 @@ $("#cust-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#cust-overla
 
 /* ---------------- Job modal ---------------- */
 function openJob(id,focusPay,presetCust){
-  editJob=id; const j=id?db.jobs.find(x=>x.id===id):null;
+  editJob=id; jobDirty=false; const j=id?db.jobs.find(x=>x.id===id):null;
   const cid=j?j.customerId:(presetCust||null);
   $("#job-title").textContent=j?"Edit Job":"New Job";
   const c=cid?custById(cid):null;
@@ -1226,7 +1233,7 @@ function bindJobForm(){
   [priceI,$("#jf-collected")].forEach(i=>i.addEventListener("input",updateBalHint));
   $("#jf-newcust").onclick=()=>{ // keep everything already typed — restored after the customer is saved
     jobDraft=gatherJob(); jobDraft.address=$("#jf-address").value.trim();
-    closeJob(); openCust(null);
+    dismissJob(); openCust(null); // dismiss, not close — the draft carries the typing, nothing must half-save
     if(jobDraft.address)$("#cf-street").value=jobDraft.address;
   };
   updateBalHint();
@@ -1251,7 +1258,7 @@ function saveJob(){
   if(editJob){j=db.jobs.find(x=>x.id===editJob);wasCompleted=j.status==="completed";Object.assign(j,data);}
   else{j=Object.assign({id:db.seqJ++,created:Date.now(),completedAt:0},data);db.jobs.push(j);}
   if(j.status==="completed"&&!j.completedAt)j.completedAt=Date.now();
-  save(); closeJob();
+  save(); dismissJob();
   if($("#cust-overlay").classList.contains("show")&&editCust)openCust(editCust);
   render(); toast("Job saved","ok");
 }
@@ -1268,12 +1275,16 @@ function completeJob(id){
   save();render();
   toast(jobBalance(j)>0?`Job done — ${money(jobBalance(j))} marked outstanding`:"Job done — paid ✓","ok");
 }
-function closeJob(){$("#job-overlay").classList.remove("show");editJob=null;}
+function dismissJob(){$("#job-overlay").classList.remove("show");editJob=null;}
+function closeJob(){ // clicking out saves — but only if something was actually typed AND a customer exists
+  if(!$("#job-overlay").classList.contains("show"))return;
+  if(jobDirty&&(+$("#jf-cust").value))saveJob(); else dismissJob();
+}
 $("#job-save").onclick=saveJob;
-$("#job-cancel").onclick=closeJob;
+$("#job-cancel").onclick=dismissJob; // Cancel = explicit discard
 $("#job-close").onclick=closeJob;
 $("#job-delete").onclick=()=>{if(!editJob)return;if(!confirm("Delete this job? This can't be undone."))return;
-  db.jobs=db.jobs.filter(x=>x.id!==editJob);save();closeJob();
+  db.jobs=db.jobs.filter(x=>x.id!==editJob);save();dismissJob();
   if($("#cust-overlay").classList.contains("show")&&editCust)openCust(editCust);render();toast("Job deleted");};
 $("#job-text").onclick=()=>{const data=gatherJob();const c=custById(data.customerId);if(c)openSms(c,Object.assign({},data));};
 $("#job-overlay").addEventListener("click",e=>{if(backdropTap(e,$("#job-overlay")))closeJob();});
