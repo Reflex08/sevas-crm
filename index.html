@@ -1524,6 +1524,8 @@ async function syncPull(){
     if(remote&&(remote.updatedAt||0)>(db.updatedAt||0)){
       db=normalize(remote);
       localStorage.setItem(KEY,JSON.stringify(db)); // direct write — save() would push right back
+      // the adopted copy may pre-date this device's baked imports (LWW races) — re-apply, save() pushes back
+      if(typeof runPendingImports==="function")runPendingImports();
       render();toast("🔄 Synced from your other device ✓","ok");
     }
     paintSyncChip();return true;
@@ -1574,9 +1576,11 @@ async function syncConnect(token){
   }catch(e){syncState="err";toast("Sync setup failed: "+e.message,"err");}
   paintSyncChip();if(view==="settings")renderSettings();
 }
-$("#sync-chip").onclick=()=>{
-  if(!syncToken()){view="settings";render();}
-  else syncPull().then(()=>syncPush());
+$("#sync-chip").onclick=async()=>{ // manual sync always says what happened — silence read as "broken"
+  if(!syncToken()){view="settings";render();return;}
+  toast("🔄 Syncing…");
+  await syncPull(); await syncPush();
+  toast(syncState==="err"?"⚠ Sync failed — check the token in Settings":`🔄 Sync complete · ${db.customers.length} customers, ${db.jobs.length} jobs`,syncState==="err"?"err":"ok");
 };
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncPull();}); // phone: pull when the app comes to the foreground
 let __rsz=null,__rw=window.innerWidth; // charts draw at container width — rebuild on rotation only.
@@ -2061,26 +2065,30 @@ if(!db.recurPurged2){
   const n2=purgeAutoRebooks2(); db.recurPurged2=true; save();
   if(n2)setTimeout(()=>toast(`Removed ${n2} repeat-clone job${n2>1?"s":""} 🧹`,"ok"),900);
 }
-let __ownerJobs=0;
-if((db.ownerImport||0)<OWNER_IMPORT.version){
-  __ownerJobs=importOwnerData();
-  db.ownerImport=OWNER_IMPORT.version; save();
+let __ownerJobs=0,__earn=null,__cont=null,__bay=null;
+/* All baked imports behind one door. Runs at startup AND after adopting a synced db —
+   sync is whole-db last-write-wins, so a device that never had an import can win the race
+   and erase it from the cloud; re-applying here makes every device converge.
+   Length guards: the public phone copy ships these EMPTY — it must never mark them done. */
+function runPendingImports(){
+  let ran=false;
+  if(OWNER_IMPORT.clients.length&&(db.ownerImport||0)<OWNER_IMPORT.version){
+    __ownerJobs=importOwnerData(); db.ownerImport=OWNER_IMPORT.version; save(); ran=true;
+  }
+  // AFTER importOwnerData — wallet rows must reconcile against the client book, not race it
+  if(EARNINGS_IMPORT.rows.length&&(db.earningsImport||0)<EARNINGS_IMPORT.version){
+    __earn=importEarnings(); db.earningsImport=EARNINGS_IMPORT.version; save(); ran=true;
+  }
+  // AFTER earnings import — contacts attach to the fullest customer book
+  if(CONTACTS_IMPORT.people.length&&(db.contactsImport||0)<CONTACTS_IMPORT.version){
+    __cont=importContacts(); db.contactsImport=CONTACTS_IMPORT.version; save(); ran=true;
+  }
+  if(BAYVIEW_IMPORT.people.length&&(db.bayviewImport||0)<BAYVIEW_IMPORT.version){
+    __bay=importBayview(); db.bayviewImport=BAYVIEW_IMPORT.version; save(); ran=true;
+  }
+  return ran;
 }
-let __earn=null; // AFTER importOwnerData — wallet rows must reconcile against the client book, not race it
-if((db.earningsImport||0)<EARNINGS_IMPORT.version){
-  __earn=importEarnings();
-  db.earningsImport=EARNINGS_IMPORT.version; save();
-}
-let __cont=null; // AFTER earnings import — contacts attach to the fullest customer book
-if((db.contactsImport||0)<CONTACTS_IMPORT.version){
-  __cont=importContacts();
-  db.contactsImport=CONTACTS_IMPORT.version; save();
-}
-let __bay=null;
-if((db.bayviewImport||0)<BAYVIEW_IMPORT.version){
-  __bay=importBayview();
-  db.bayviewImport=BAYVIEW_IMPORT.version; save();
-}
+runPendingImports();
 render();
 if(db.migrated){toast("Your previous contacts were imported ✓","ok");delete db.migrated;save();}
 if(__ownerJobs)setTimeout(()=>toast(`Auto-loaded ${__ownerJobs} client sale${__ownerJobs!==1?"s":""} you sent — marked done & paid ✓`,"ok"),700);
