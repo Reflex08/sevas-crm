@@ -1762,6 +1762,37 @@ function importContacts(){
 }
 /* ===CONTACTS_IMPORT_END=== */
 
+/* ===BAYVIEW_IMPORT_START=== */
+// Bayview Village D2D blitz (2026-07-14, reps Kyrie/Franz/Daniel/Daviti). One-time, phone-deduped.
+const BAYVIEW_IMPORT={version:1,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
+function importBayview(){
+  const digits=p=>(p||"").replace(/\D/g,"").replace(/^1/,"");
+  let added=0,jobs=0;
+  for(const p of BAYVIEW_IMPORT.people){
+    let c=db.customers.find(x=>digits(x.phone)&&digits(x.phone)===digits(p.phone));
+    if(!c){
+      c={id:db.seqC++,name:p.name,phone:p.phone,email:"",street:p.street||"",city:"",state:"",zip:"",
+        status:p.status,source:"Bayview Village D2D blitz",tags:[],access:"",notes:p.note||"",
+        followup:p.followup||"",log:[{t:Date.now(),m:"📋 Imported — Bayview Village D2D blitz"}],created:Date.now()};
+      db.customers.push(c);added++;
+    }else{
+      if(p.street&&!c.street)c.street=p.street;
+      if(p.note)c.notes=c.notes?(c.notes+"\n"+p.note):p.note;
+      if(p.followup&&!c.followup)c.followup=p.followup;
+    }
+    for(const j of (p.jobs||[])){
+      if(db.jobs.some(x=>x.customerId===c.id&&x.date===j.date&&x.service===j.service&&x.status==="scheduled"))continue;
+      db.jobs.push({id:db.seqJ++,customerId:c.id,service:j.service,price:j.price,date:j.date,time:j.time,
+        recurring:"none",status:"scheduled",collected:0,payMethod:"",crew:"",closedBy:"",commissionPct:0,
+        notes:j.notes||"",created:Date.now(),completedAt:0});
+      c.log=c.log||[];c.log.push({t:Date.now(),m:`📋 Booked ${j.service} ${j.date}${j.time?" "+j.time:""} · $${j.price}`});
+      jobs++;
+    }
+  }
+  return{added,jobs};
+}
+/* ===BAYVIEW_IMPORT_END=== */
+
 /* ---------------- Quick add (✨ text/screenshot → leads) ---------------- */
 const AI_KEY="servicepro.aikey"; // stored alone, never inside db → never leaves this PC in a backup
 /* Free local parser — plain speech in, structured client + job out. No AI needed.
@@ -2032,10 +2063,16 @@ if((db.contactsImport||0)<CONTACTS_IMPORT.version){
   __cont=importContacts();
   db.contactsImport=CONTACTS_IMPORT.version; save();
 }
+let __bay=null;
+if((db.bayviewImport||0)<BAYVIEW_IMPORT.version){
+  __bay=importBayview();
+  db.bayviewImport=BAYVIEW_IMPORT.version; save();
+}
 render();
 if(db.migrated){toast("Your previous contacts were imported ✓","ok");delete db.migrated;save();}
 if(__ownerJobs)setTimeout(()=>toast(`Auto-loaded ${__ownerJobs} client sale${__ownerJobs!==1?"s":""} you sent — marked done & paid ✓`,"ok"),700);
 if(__earn)setTimeout(()=>toast(`📥 Earnings synced: ${__earn.added} jobs added, ${__earn.updated} amounts corrected, ${__earn.newCust} new customers`,"ok"),1200);
+if(__bay&&(__bay.added||__bay.jobs))setTimeout(()=>toast(`📋 Bayview blitz: ${__bay.added} clients, ${__bay.jobs} booked jobs · 4 flagged for follow-up`,"ok"),2500);
 if(__cont)setTimeout(()=>toast(`📇 Contacts synced: ${__cont.attached} phones attached, ${__cont.created} added, ${__cont.dup} already in CRM${__cont.skipped.length?`, ${__cont.skipped.length} ambiguous (noted)`:""}`,"ok"),1900);
 initAutoBackup();setInterval(paintBackupChip,60000);
 syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
