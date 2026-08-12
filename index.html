@@ -1764,12 +1764,15 @@ function importContacts(){
 
 /* ===BAYVIEW_IMPORT_START=== */
 // Bayview Village D2D blitz (2026-07-14, reps Kyrie/Franz/Daniel/Daviti). One-time, phone-deduped.
-const BAYVIEW_IMPORT={version:1,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
+const BAYVIEW_IMPORT={version:2,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
 function importBayview(){
   const digits=p=>(p||"").replace(/\D/g,"").replace(/^1/,"");
   let added=0,jobs=0;
   for(const p of BAYVIEW_IMPORT.people){
     let c=db.customers.find(x=>digits(x.phone)&&digits(x.phone)===digits(p.phone));
+    // v1 put "this Friday" on the 17th — if that already landed on this device, slide it to the real date
+    if(c)for(const j of (p.jobs||[]))db.jobs.forEach(x=>{
+      if(x.customerId===c.id&&x.service===j.service&&x.status==="scheduled"&&x.date==="2026-07-17"&&j.date!=="2026-07-17")x.date=j.date;});
     if(!c){
       c={id:db.seqC++,name:p.name,phone:p.phone,email:"",street:p.street||"",city:"",state:"",zip:"",
         status:p.status,source:"Bayview Village D2D blitz",tags:[],access:"",notes:p.note||"",
