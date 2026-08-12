@@ -702,9 +702,13 @@ function heroCard(){
     <div class="hline">${opts[heroPick%opts.length]}</div></div>`;
 }
 let moneyOpen=false; // Money details <details> keeps its state across re-renders
+let homeSched=uiPref().homeSched||"today"; // Home schedule toggle: today | week
 function renderDashboard(){
   const t=today();
   const todays=db.jobs.filter(j=>j.status==="scheduled"&&j.date===t).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  const week=db.jobs.filter(j=>j.status==="scheduled"&&j.date>=t&&j.date<=offset(7))
+    .sort((a,b)=>a.date.localeCompare(b.date)||(a.time||"").localeCompare(b.time||""));
+  const list=homeSched==="week"?week:todays;
   const dueFollow=db.customers.filter(c=>c.followup&&c.followup<=t);
   const overdue=db.jobs.filter(j=>j.status==="scheduled"&&j.date<t);
 
@@ -712,20 +716,22 @@ function renderDashboard(){
    ${heroCard()}
    ${dashRevenuePanel()}
    <div class="panel" style="margin-bottom:18px">
-     <h2>📋 Today's schedule <span class="pill">${todays.length}</span></h2>
+     <h2>📋 Schedule <span class="pill">${list.length}</span><span class="spacer"></span>
+       <div class="seg"><button data-hs="today" class="${homeSched==="today"?"active":""}">Today</button><button data-hs="week" class="${homeSched==="week"?"active":""}">This week</button></div></h2>
      ${overdue.length?`<div style="padding:12px 18px 0"><div class="agenda-head overdue">⚠ ${overdue.length} overdue job${overdue.length!==1?"s":""} not marked done</div></div>`:""}
      <div class="panel-pad" id="today-list"></div>
    </div>
    ${dueFollow.length?`<button class="btn" id="follow-pill" style="margin-bottom:18px">⏰ ${dueFollow.length} follow-up${dueFollow.length!==1?"s":""} due →</button>`:""}
    ${moneyDetails()}`;
 
-  $("#today-list").innerHTML = (overdue.concat(todays)).length
-    ? overdue.map(j=>jobCard(j,true)).join("")+todays.map(j=>jobCard(j)).join("")
-    : `<div class="empty"><div class="big">☀️</div>No jobs scheduled today. Enjoy the day — or book one!<br><button class="btn btn-primary" id="empty-add">＋ New Job</button></div>`;
+  $("#today-list").innerHTML = (overdue.concat(list)).length
+    ? overdue.map(j=>jobCard(j,true)).join("")+list.map(j=>jobCard(j)).join("")
+    : `<div class="empty"><div class="big">☀️</div>${homeSched==="week"?"Nothing booked in the next 7 days.":"No jobs scheduled today. Enjoy the day — or book one!"}<br><button class="btn btn-primary" id="empty-add">＋ New Job</button></div>`;
   const ea=$("#empty-add"); if(ea) ea.onclick=()=>openJob(null);
   const fp=$("#follow-pill"); if(fp) fp.onclick=()=>{view="customers";render();};
 
   bindJobCards(); bindMoneyDetails();
+  document.querySelectorAll("[data-hs]").forEach(b=>b.onclick=()=>{homeSched=b.dataset.hs;uiSet({homeSched});renderDashboard();});
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;uiSet({revPeriod:dashRevPeriod});renderDashboard();});
   bindChartTips();
 }
