@@ -32,17 +32,16 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    background:var(--bg0);color:var(--ink);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+    background:var(--bg0);color:var(--ink);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;
+    background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.025) 0 1px,transparent 1px 56px),repeating-linear-gradient(25deg,rgba(255,255,255,.02) 0 1px,transparent 1px 56px);
+    background-attachment:fixed}
   button{font-family:inherit;cursor:pointer}
   input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
   a{color:var(--brand);text-decoration:none}
   a:hover{text-decoration:underline}
   .mono{font-variant-numeric:tabular-nums}
 
-  /* ---------- Layout ---------- */
-  .app{display:flex;min-height:100vh}
-  .sidebar{width:236px;background:rgba(255,255,255,.04);border-right:1px solid var(--line);color:var(--muted);
-    flex-shrink:0;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  /* ---------- Layout (Flyra: no sidebar/topbar/tabbar — floating chrome only) ---------- */
   /* Wordmark matches sevasservices.com — serif logotype, gold accent */
   .brand{padding:22px 20px 18px;font-family:Georgia,"Times New Roman",serif;font-size:20px;font-weight:700;color:var(--ink);letter-spacing:.01em;line-height:1.15}
   .brand em{color:var(--brand);font-style:normal}
@@ -62,16 +61,31 @@
   .helper-status .led{width:9px;height:9px;border-radius:50%;background:#6b7385;flex-shrink:0}
   .helper-status.on .led{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.18)}
 
-  .main{flex:1;min-width:0;display:flex;flex-direction:column}
-  .topbar{background:rgba(7,8,10,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
-    padding:calc(env(safe-area-inset-top, 0px) + 13px) 28px 13px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:5}
-  .topbar h1{font-size:20px;margin:0;font-weight:800;letter-spacing:-.2px}
-  .topbar .sub{color:var(--muted);font-size:12.5px;font-weight:600;margin-top:1px}
   .search{flex:1;max-width:380px;position:relative}
   .search input{width:100%;padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:10px;background:var(--field-bg);color:var(--ink);outline:none}
   .search input:focus{border-color:var(--brand);background:rgba(7,8,10,.82);box-shadow:0 0 0 3px var(--brand-soft)}
   .search .mag{position:absolute;left:11px;top:9px;color:var(--faint)}
-  .content{padding:24px 28px 40px;flex:1}
+  .content{padding:calc(var(--safetop,env(safe-area-inset-top,0px)) + 66px) 18px 110px;max-width:1080px;margin:0 auto}
+
+  /* ---------- Floating chrome (hamburger, drawer, FAB) ---------- */
+  .fcir{width:42px;height:42px;border-radius:50%;border:1px solid var(--line);background:rgba(13,14,18,.85);
+    backdrop-filter:blur(8px);color:var(--ink);font-size:17px;display:inline-flex;align-items:center;justify-content:center;box-shadow:var(--shadow);flex-shrink:0}
+  .fpill{position:relative;height:42px;border-radius:999px;border:1px solid var(--line);background:rgba(13,14,18,.85);backdrop-filter:blur(8px);
+    color:var(--ink);font-weight:700;font-size:13px;padding:0 16px;display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
+  .fpill select{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+  #menu-btn{position:fixed;top:calc(var(--safetop,env(safe-area-inset-top,0px)) + 12px);left:14px;z-index:45}
+  .drawer{position:fixed;top:0;left:0;bottom:0;width:280px;background:#0d0e12;border-right:1px solid var(--line);
+    z-index:60;transform:translateX(-100%);transition:transform .22s;display:flex;flex-direction:column;
+    padding:calc(var(--safetop,env(safe-area-inset-top,0px)) + 10px) 0 14px}
+  .drawer.open{transform:none}
+  .drawer-veil{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:55;display:none}
+  .drawer-veil.show{display:block}
+  .drawer-actions{padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+  .drawer-actions .btn{width:100%;justify-content:center}
+  .fab{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;
+    border:0;background:#7cc4fa;color:#06283d;font-size:26px;display:inline-flex;align-items:center;justify-content:center;
+    z-index:44;box-shadow:var(--shadow-lg)}
+  .no-fab .fab{display:none}
 
   /* ---------- Buttons ---------- */
   .btn{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:9px 15px;font-weight:700;color:var(--ink);font-size:13.5px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
@@ -98,9 +112,9 @@
   .fh-sub{color:var(--faint);font-style:italic;margin-top:3px;font-size:14px}
   .fh-stat{margin-top:10px;color:var(--muted);font-size:13.5px}
   .fh-stat b{color:var(--ink)}
-  .fh-big{font-size:28px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:2px 0 6px}
+  .fh-big{font-size:32px;font-weight:800;font-style:italic;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:2px 0 6px}
   .ftab{border:0;background:transparent;color:var(--muted);font-weight:700;font-size:13.5px;padding:7px 14px;border-radius:999px}
-  .ftab.active{background:rgba(255,255,255,.1);color:var(--ink)}
+  .ftab.active{background:transparent;color:var(--purple)}
   .lb-row{display:flex;align-items:center;gap:12px;padding:10px 18px;border-top:1px solid var(--line)}
   .lb-rank{color:var(--muted);font-size:12px;width:18px;flex-shrink:0}
   .lb-comm{color:var(--cyan);font-weight:800;margin-left:auto;font-variant-numeric:tabular-nums}
@@ -187,8 +201,20 @@
   .lc-mid{flex:1;min-width:0}
   .lc-right{display:flex;align-items:center;gap:9px;flex-shrink:0}
   .lchip{background:rgba(86,184,245,.16);color:#7cc4fa;border-radius:999px;padding:3px 10px;font-weight:800;font-size:12.5px;font-variant-numeric:tabular-nums}
-  .lc-chev{color:var(--faint);font-size:17px}
-  .lead-total{text-align:center;color:var(--faint);font-size:12.5px;margin:14px 0 4px;font-weight:600}
+  .lead-total{text-align:left;font-style:italic;color:var(--faint);font-size:12.5px;margin:14px 0 4px;font-weight:600}
+  .lx-title{position:relative;font-size:30px;font-weight:800;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+  .lx-title select{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+  .lx-chev{color:var(--muted);font-size:18px}
+  .lx-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .lg-total{margin-left:auto;color:#7cc4fa;font-weight:800}
+  .ph-pill{display:inline-block;background:#0d0e12;border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--muted);font-weight:600;margin-top:3px}
+  .lc-arrow{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:#0d0e12;color:var(--muted);flex-shrink:0;font-size:14px}
+  .lc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .lc-tags .lchip{padding:2px 8px;font-size:11px}
+  .cust-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
+  .cust-foot .lead-total{margin:0;flex:1}
+  .cust-foot .fpill,.cust-foot .fcir{height:32px;font-size:12px;padding:0 12px}
+  .cust-foot .fcir{width:32px;padding:0}
 
   /* ---------- Schedule agenda ---------- */
   .agenda-grp{margin-bottom:22px}
@@ -196,11 +222,12 @@
   .agenda-head .cnt{font-size:12px;color:var(--muted);font-weight:700;background:var(--gray-soft);border-radius:20px;padding:1px 9px}
   .agenda-head.overdue{color:var(--red)}
   /* ---------- Schedule day timeline ---------- */
-  .tl-head{display:flex;align-items:center;justify-content:center;gap:18px;margin:6px 0 2px}
-  .tl-head .nb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:17px;display:flex;align-items:center;justify-content:center}
-  .tlh-dow{color:var(--muted);font-size:13px;font-weight:600;text-align:center}
-  .tlh-date{font-size:22px;font-weight:800;text-align:center;letter-spacing:-.3px}
-  .tl-rev{text-align:center;color:var(--muted);font-size:13px;margin:6px 0 14px}
+  .tl-head{display:flex;align-items:flex-end;gap:10px;justify-content:flex-start;text-align:left;margin:2px 0 4px}
+  .tl-head .nb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:17px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .tlh-wrap{flex:1;min-width:0}
+  .tlh-dow{color:var(--muted);font-size:14px;font-weight:600;text-align:left;font-style:italic}
+  .tlh-date{font-size:26px;font-weight:800;text-align:left;letter-spacing:-.3px}
+  .tl-rev{text-align:left;color:var(--muted);font-size:13px;margin:4px 0 0;font-style:italic}
   .tl-row{display:flex;gap:10px;border-top:1px solid var(--line);min-height:54px}
   .tl-hour{width:52px;flex-shrink:0;color:var(--faint);font-size:11px;font-weight:700;padding-top:8px;text-align:right}
   .tl-slot{flex:1;display:flex;flex-wrap:wrap;gap:8px;padding:8px 0}
@@ -208,6 +235,7 @@
   .tl-card.done{background:linear-gradient(135deg,#14532d,#166534)}
   .tl-card .n{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-card .s{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:1px}
+  .tl-card .tr{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:1px}
   .tl-card .p{font-weight:800;font-size:14px;margin-top:6px}
   .jobcard{display:flex;gap:14px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:16px;
     padding:13px 16px;box-shadow:var(--shadow);margin-bottom:10px}
@@ -257,10 +285,10 @@
 
   /* quote sheet */
   .qgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:10px 0 16px}
-  .qm{background:#0d0e12;border:1px solid var(--line);border-radius:11px;padding:10px 6px;text-align:center;font-weight:700;font-size:12.5px;color:var(--muted)}
+  .qm{background:#0d0e12;border:1px solid var(--line);border-radius:11px;padding:10px 6px;text-align:center;font-weight:700;font-size:12.5px;color:var(--ink)}
   .qm small{display:block;font-size:10px;color:var(--faint);font-weight:600}
   .qm-hit{border-color:#34d399;color:#34d399}
-  .qm-hit .vis{display:block;font-size:8.5px;letter-spacing:.08em;font-weight:800;margin-top:2px}
+  .qm-hit .vis{display:block;font-size:8.5px;letter-spacing:.08em;font-weight:800;margin-bottom:2px}
   .qnotes{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--muted);font-size:13px;margin-top:3px}
   #sig-pad{width:100%;height:180px;background:#0d0e12;border:1px solid var(--line);border-radius:14px;touch-action:none;display:block}
 
@@ -310,21 +338,10 @@
   .chart-tip .tv{color:var(--green);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
 
   /* ---------- Mobile (phone / PWA) ---------- */
-  .bottombar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(7,8,10,.92);
-    backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
-  .bottombar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px;
-    color:var(--muted);font-size:10.5px;font-weight:700;border-radius:10px}
-  .bottombar a span{font-size:20px;line-height:1}
-  .bottombar a.active{color:var(--brand)}
-  .bottombar a:hover{text-decoration:none}
   @media(max-width:860px){
-    .sidebar{display:none}
-    .bottombar{display:flex}
     .grid-2{grid-template-columns:1fr}.grid3{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}
-    .content{padding:16px 14px 100px}
-    .topbar{padding:calc(var(--safetop, env(safe-area-inset-top, 0px)) + 12px) 14px 10px;flex-wrap:wrap;gap:8px} /* clears the Dynamic Island / status bar */
-    .topbar h1{font-size:17px}
-    .topbar .sub{display:none}
+    /* top padding clears the Dynamic Island / status bar + floating ≡ */
+    .content{padding:calc(var(--safetop, env(safe-area-inset-top, 0px)) + 62px) 14px 110px}
     .search{order:5;flex-basis:100%;max-width:none}
     .panel{overflow-x:auto}
     input,select,textarea{font-size:16px} /* 16px stops iOS zoom-on-focus */
@@ -337,37 +354,26 @@
 </style>
 </head>
 <body>
-<div class="app">
-  <aside class="sidebar">
-    <div class="brand"><div>Seva<em>&#8217;s</em> Services<small>Window &amp; Home Services</small></div></div>
-    <nav class="nav" id="nav">
-      <a data-view="dashboard" class="active"><span class="ic">▦</span> Home</a>
-      <a data-view="schedule"><span class="ic">🗓️</span> Schedule <span class="count" id="c-sched">0</span></a>
-      <a data-view="customers"><span class="ic">👥</span> Clients <span class="count" id="c-cust">0</span></a>
-    </nav>
-    <div class="helper-status" id="backup-chip" title="Automatic backup status"><span class="led"></span><span id="backup-text">Auto-backup: off</span></div>
-    <div class="helper-status" id="sync-chip" title="Cloud sync between your PC and phone"><span class="led"></span><span id="sync-text">Cloud sync: off</span></div>
-    <div style="height:12px"></div>
-  </aside>
+<button class="fcir" id="menu-btn" aria-label="Menu">&#8801;</button>
+<div class="drawer-veil" id="drawer-veil"></div>
+<aside class="drawer" id="drawer">
+  <div class="brand"><div>Seva<em>&#8217;s</em> Services<small>Window &amp; Home Services</small></div></div>
+  <nav class="nav" id="nav">
+    <a data-view="dashboard" class="active"><span class="ic">▦</span> Home</a>
+    <a data-view="schedule"><span class="ic">🗓️</span> Schedule <span class="count" id="c-sched">0</span></a>
+    <a data-view="customers"><span class="ic">👥</span> Leads <span class="count" id="c-cust">0</span></a>
+    <a data-view="settings"><span class="ic">⚙️</span> Settings</a>
+  </nav>
+  <div class="drawer-actions">
+    <button class="btn" id="quick-add" title="Say what happened — clients & jobs fill themselves out">✨ Quick add</button>
+    <button class="btn btn-primary" id="add-job">＋ New Job</button>
+  </div>
+  <div class="helper-status" id="backup-chip" title="Automatic backup status"><span class="led"></span><span id="backup-text">Auto-backup: off</span></div>
+  <div class="helper-status" id="sync-chip" title="Cloud sync between your PC and phone"><span class="led"></span><span id="sync-text">Cloud sync: off</span></div>
+</aside>
 
-  <main class="main">
-    <div class="topbar">
-      <div><h1 id="title">Home</h1><div class="sub" id="subtitle"></div></div>
-      <span class="spacer"></span>
-      <button class="btn" id="quick-add" title="Say what happened — clients & jobs fill themselves out">✨ Quick add</button>
-      <button class="btn btn-primary" id="add-job">＋ New Job</button>
-      <button class="btn" id="open-settings" title="Settings">⚙️</button>
-    </div>
-    <div class="content" id="content"></div>
-  </main>
-</div>
-
-<!-- Mobile bottom nav (phones / iOS home-screen app) -->
-<nav class="bottombar" id="bottombar">
-  <a data-view="dashboard" class="active"><span>▦</span>Home</a>
-  <a data-view="schedule"><span>🗓️</span>Schedule</a>
-  <a data-view="customers"><span>👥</span>Clients</a>
-</nav>
+<main class="main"><div class="content" id="content"></div></main>
+<button class="fab" id="fab-add" aria-label="New job">＋</button>
 
 <!-- Customer modal -->
 <div class="overlay" id="cust-overlay"><div class="modal lg">
@@ -552,9 +558,11 @@ function uiSet(p){localStorage.setItem("servicepro.ui",JSON.stringify(Object.ass
 
 /* ---------------- State ---------------- */
 let view="dashboard",query="",custFilter="all",custSort="name-asc",schedFilter="upcoming",moneyPeriod="month";
+let custSearchOpen=false,custPage=0,custPageSize=25;
 let dashRevPeriod=uiPref().revPeriod||"month"; // chart style: smooth area, everywhere (bars/line retired)
 let dashRevTab="revenue"; // revenue | goal — in-memory only
 let lbPeriod="month";     // leaderboard range: month | year | all — in-memory only
+let lbMetric="sales";     // leaderboard sort metric: sales | commission — in-memory only
 let schedView=uiPref().schedView||"day"; // day | list
 let schedDay=today();     // ISO day shown by the timeline — in-memory only
 let editCust=null,editJob=null,draftLog=[],smsCtx=null,jobDraft=null,jobDirty=false,custDirty=false,toastTimer=null;
@@ -565,6 +573,7 @@ const esc=s=>(s==null?"":String(s)).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt
 function money(n){n=+n||0;const neg=n<0;n=Math.abs(n);
   const s=n%1===0?n.toLocaleString():n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
   return (neg?"-$":"$")+s;}
+function money2(n){return "$"+(+n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
 function avatarColor(name){let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);
   const c=["#38bdf8","#34d399","#a78bfa","#fbbf24","#fb7185","#2ab8e8","#f472b6","#a3e635"];return c[Math.abs(h)%c.length];}
 function initials(name){const p=(name||"").trim().split(/\s+/);return ((p[0]||"")[0]||"?").toUpperCase()+((p[1]||"")[0]||"").toUpperCase();}
@@ -579,6 +588,8 @@ function fmtDate(d,opt){if(!d)return"—";const x=new Date(d+"T00:00:00");
 function fmtDateShort(d){if(!d)return"—";const x=new Date(d+"T00:00:00");return x.toLocaleDateString(undefined,{month:"short",day:"numeric"});}
 function fmtDow(d){if(!d)return"";const x=new Date(d+"T00:00:00");return x.toLocaleDateString(undefined,{weekday:"short"});}
 function fmtTime(t){if(!t)return"";const[h,m]=t.split(":").map(Number);const ap=h>=12?"PM":"AM";const hh=((h+11)%12)+1;return `${hh}:${String(m).padStart(2,"0")} ${ap}`;}
+function tlTimeRange(t){if(!t)return"";const[h,m]=t.split(":").map(Number);let eh=h+1,em=m;if(eh>23){eh=23;em=59;}
+  return `${fmtTime(t)} - ${fmtTime(`${eh}:${em}`)}`;}
 function fmtWhen(ts){return new Date(ts).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});}
 function toast(m,kind){const t=$("#toast");clearTimeout(toastTimer);t.textContent=m;t.className="toast show"+(kind?(" "+kind):"");toastTimer=setTimeout(()=>t.className="toast",kind==="err"?3400:2300);}
 function toastAction(m,btnLabel,fn){const t=$("#toast");clearTimeout(toastTimer);t.textContent=m;
@@ -624,8 +635,8 @@ function chartGeo(data,height){
   let grid="";
   for(let i=0;i<=ticks;i++){const y=padT+ch-(ch*i/ticks);
     grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>`;
-    grid+=`<text x="${padL-8}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="#6b7280">${moneyShort(niceMax*i/ticks)}</text>`;}
-  const xLabels=data.map((d,i)=>showLbl(i)?`<text x="0" y="${H-8}" text-anchor="middle" font-size="10.5" fill="#9aa1ab" font-weight="600" data-lx="${i}">${esc(d.label)}</text>`:"").join("");
+    grid+=`<text x="${padL-8}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10" font-style="italic" fill="#6b7280">${moneyShort(niceMax*i/ticks)}</text>`;}
+  const xLabels=data.map((d,i)=>showLbl(i)?`<text x="0" y="${H-8}" text-anchor="middle" font-size="10.5" font-style="italic" fill="#9aa1ab" font-weight="600" data-lx="${i}">${esc(d.label)}</text>`:"").join("");
   return {W,H,padL,padR,padT,padB,cw,ch,n,niceMax,ticks,step,showLbl,maxV,grid,xLabels};
 }
 function svgWrap(g,inner,defs){
@@ -655,8 +666,8 @@ function areaChartSVG(data,height){
   const baseline=`<line x1="${g.padL}" y1="${base.toFixed(1)}" x2="${(g.W-g.padR).toFixed(1)}" y2="${base.toFixed(1)}" stroke="rgba(255,255,255,.15)" stroke-width="1.25"/>`;
   let cols="",labels="";
   data.forEach((d,i)=>{const[x,y]=pts[i];
-    if(d.value>0&&(i===data.length-1||d.value===g.maxV))labels+=`<text x="${x.toFixed(1)}" y="${(y-12).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" fill="#f2f9ff">${moneyShort(d.value)}</text>`;
-    if(g.showLbl(i))labels+=`<text x="${x.toFixed(1)}" y="${g.H-8}" text-anchor="middle" font-size="10.5" fill="#9aa1ab" font-weight="600">${esc(d.label)}</text>`;
+    if(d.value>0&&(i===data.length-1||d.value===g.maxV))labels+=`<text x="${x.toFixed(1)}" y="${(y-12).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" font-style="italic" fill="#f2f9ff">${moneyShort(d.value)}</text>`;
+    if(g.showLbl(i))labels+=`<text x="${x.toFixed(1)}" y="${g.H-8}" text-anchor="middle" font-size="10.5" fill="#9aa1ab" font-weight="600" font-style="italic">${esc(d.label)}</text>`;
     const gap=g.cw/Math.max(1,g.n);
     cols+=`<g class="acol" data-lbl="${esc(d.label)+(d.year?(" "+d.year):"")}" data-val="${esc(money(d.value))}">
       <rect x="${(x-gap/2).toFixed(1)}" y="${g.padT.toFixed(1)}" width="${gap.toFixed(1)}" height="${(g.ch+6).toFixed(1)}" fill="transparent"/>
@@ -718,14 +729,14 @@ function dashRevenuePanel(){
   const body=hit.length?areaChartSVG(series,184)
     :`<div class="empty" style="padding:28px"><div class="big">📊</div>No revenue in this range yet.</div>`;
   return `<div class="panel" style="margin-bottom:18px" id="dash-rev">
-    <div class="panel-pad" style="padding:12px 16px 10px">
+    <div class="panel-pad" style="padding:16px 18px">
       <div style="display:flex;gap:4px;margin-bottom:10px">
         ${[["revenue","Revenue"],["goal","Goal"]].map(([v,l])=>`<button class="ftab ${dashRevTab===v?"active":""}" data-ftab="${v}">${l}</button>`).join("")}
       </div>
-      <div class="sec" style="margin:0">${goal?"Goal":"Revenue"}</div>
+      <div class="sec" style="margin:0;color:#fff;font-size:12px;font-weight:700">${goal?"Goal":"Revenue"}</div>
       <div class="fh-big">${big}</div>
       ${body}
-      <div style="color:var(--muted);font-size:12px;margin-top:6px">Avg: ${money(Math.round(avg))}</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:6px;font-style:italic">Avg: ${money(Math.round(avg))}</div>
       ${goal?"":`<div class="toolbar" style="margin-top:10px">
         <div class="seg">${periods.map(([v,l])=>`<button data-rp="${v}" class="${dashRevPeriod===v?"active":""}">${l}</button>`).join("")}</div>
       </div>`}
@@ -742,13 +753,16 @@ function leaderboardPanel(){
   db.jobs.filter(j=>j.status!=="cancelled"&&j.closedBy&&j.date>=from&&j.date<=to).forEach(j=>{
     const o=byCloser[j.closedBy]=byCloser[j.closedBy]||{sales:0,count:0,comm:0};
     o.sales+=(+j.price||0);o.count++;o.comm+=(+j.price||0)*(+j.commissionPct||0)/100;});
-  const rows=Object.entries(byCloser).sort((a,b)=>b[1].comm-a[1].comm);
-  const money2=n=>"$"+(+n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const rows=Object.entries(byCloser).sort((a,b)=>lbMetric==="sales"?b[1].sales-a[1].sales:b[1].comm-a[1].comm);
   const opts=[["month","This month"],["year","This year"],["all","All time"]]
     .map(([v,l])=>`<option value="${v}" ${lbPeriod===v?"selected":""}>${l}</option>`).join("");
+  const metricOpts=[["sales","Sales"],["commission","Commission"]]
+    .map(([v,l])=>`<option value="${v}" ${lbMetric===v?"selected":""}>${l}</option>`).join("");
+  const pillSel="border-radius:999px;padding:7px 14px;background:#0d0e12;border:1px solid var(--line);color:var(--ink);font-weight:600;font-size:12.5px";
   return `<div class="panel" style="margin-bottom:18px">
-    <h2>🏆 ${esc(label)} Leaderboard<span class="spacer"></span>
-      <select id="lb-period" style="padding:6px 9px;border:1px solid var(--line);border-radius:9px;background:var(--field-bg);color:var(--ink);font-weight:600;font-size:12.5px">${opts}</select></h2>
+    <h2>🏆 ${esc(label)}${lbPeriod==="all"?" ":". "}Leaderboard<span class="spacer"></span>
+      <select id="lb-metric" style="${pillSel};margin-right:8px">${metricOpts}</select>
+      <select id="lb-period" style="${pillSel}">${opts}</select></h2>
     ${rows.length?rows.map(([n,v],i)=>`<div class="lb-row">
       <div class="lb-rank">${i+1}</div>
       <div class="avatar" style="background:${avatarColor(n)}">${esc(initials(n))}</div>
@@ -764,12 +778,10 @@ function render(){
   if(view==="money")view="dashboard"; // Money tab folded into Home
   $("#c-sched").textContent=db.jobs.filter(j=>j.status==="scheduled").length;
   $("#c-cust").textContent=db.customers.length;
-  document.querySelectorAll("#nav a,#bottombar a").forEach(a=>a.classList.toggle("active",a.dataset.view===view));
-  const T={dashboard:["Home",todayLong()],schedule:["Schedule","Upcoming jobs & appointments"],customers:["Clients","Your client & lead book"],settings:["Settings","Business setup, services & templates"]};
-  $("#title").textContent=T[view][0]; $("#subtitle").textContent=T[view][1];
+  document.querySelectorAll("#nav a").forEach(a=>a.classList.toggle("active",a.dataset.view===view));
+  document.body.classList.toggle("no-fab",view==="settings");
   ({dashboard:renderDashboard,schedule:renderSchedule,customers:renderCustomers,settings:renderSettings}[view])();
 }
-function todayLong(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
 
 /* ---- Dashboard ---- */
 /* Personal stat greeting — ONE line picked per app-open (stable while clicking around),
@@ -859,6 +871,7 @@ function renderDashboard(){
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;uiSet({revPeriod:dashRevPeriod});renderDashboard();});
   document.querySelectorAll("[data-ftab]").forEach(b=>b.onclick=()=>{dashRevTab=b.dataset.ftab;renderDashboard();});
   const lb=$("#lb-period"); if(lb) lb.onchange=()=>{lbPeriod=lb.value;renderDashboard();};
+  const lbm=$("#lb-metric"); if(lbm) lbm.onchange=()=>{lbMetric=lbm.value;renderDashboard();};
   bindChartTips();
 }
 
@@ -870,74 +883,86 @@ function renderSchedule(){
   if(showCompleted){ jobs=jobs.filter(j=>j.status==="completed").sort((a,b)=>b.date.localeCompare(a.date)||(b.time||"").localeCompare(a.time||"")); }
   else { jobs=jobs.filter(j=>j.status==="scheduled").sort((a,b)=>a.date.localeCompare(b.date)||(a.time||"").localeCompare(b.time||"")); }
 
-  const head=`<div class="toolbar">
-     <div class="seg">
-       <button data-sv="day" class="${schedView==="day"?"active":""}">Day</button>
-       <button data-sv="list" class="${schedView==="list"?"active":""}">List</button>
-     </div>
-     ${schedView==="list"?`<div class="seg">
-       <button data-sf="upcoming" class="${schedFilter==="upcoming"?"active":""}">Upcoming</button>
-       <button data-sf="completed" class="${schedFilter==="completed"?"active":""}">Completed</button>
-     </div>
-     <span class="hint">${jobs.length} job${jobs.length!==1?"s":""}</span>`:""}
-     <span class="spacer"></span>
-     <button class="btn btn-primary" id="sched-add">＋ New Job</button>
-   </div>`;
+  const head=schedHeader();
 
   let body="";
   if(schedView==="day"){
     body=renderDayTimeline();
-  } else if(!jobs.length){
-    body=`<div class="panel"><div class="empty"><div class="big">🗓️</div>${showCompleted?"No completed jobs yet.":"Nothing scheduled. Book your first job!"}<br>${showCompleted?"":`<button class="btn btn-primary" id="empty-add2">＋ New Job</button>`}</div></div>`;
-  } else if(showCompleted){
-    body=jobs.map(j=>jobCard(j)).join("");
   } else {
-    const groups=[
-      {key:"overdue",label:"⚠ Overdue",test:j=>j.date<t,cls:"overdue"},
-      {key:"today",label:"Today",test:j=>j.date===t},
-      {key:"tomorrow",label:"Tomorrow",test:j=>j.date===offset(1)},
-      {key:"week",label:"This week",test:j=>j.date>offset(1)&&j.date<=offset(7)},
-      {key:"later",label:"Later",test:j=>j.date>offset(7)},
-    ];
-    const used=new Set();
-    body=groups.map(g=>{
-      const list=jobs.filter(j=>!used.has(j.id)&&g.test(j)); list.forEach(j=>used.add(j.id));
-      if(!list.length)return"";
-      return `<div class="agenda-grp"><div class="agenda-head ${g.cls||""}">${g.label} <span class="cnt">${list.length}</span></div>${list.map(j=>jobCard(j)).join("")}</div>`;
-    }).join("");
+    const listHead=`<div class="toolbar" style="margin:10px 0 14px">
+       <div class="seg">
+         <button data-sf="upcoming" class="${schedFilter==="upcoming"?"active":""}">Upcoming</button>
+         <button data-sf="completed" class="${schedFilter==="completed"?"active":""}">Completed</button>
+       </div>
+       <span class="hint">${jobs.length} job${jobs.length!==1?"s":""}</span>
+     </div>`;
+    let listBody;
+    if(!jobs.length){
+      listBody=`<div class="panel"><div class="empty"><div class="big">🗓️</div>${showCompleted?"No completed jobs yet.":"Nothing scheduled. Book your first job!"}<br>${showCompleted?"":`<button class="btn btn-primary" id="empty-add2">＋ New Job</button>`}</div></div>`;
+    } else if(showCompleted){
+      listBody=jobs.map(j=>jobCard(j)).join("");
+    } else {
+      const groups=[
+        {key:"overdue",label:"⚠ Overdue",test:j=>j.date<t,cls:"overdue"},
+        {key:"today",label:"Today",test:j=>j.date===t},
+        {key:"tomorrow",label:"Tomorrow",test:j=>j.date===offset(1)},
+        {key:"week",label:"This week",test:j=>j.date>offset(1)&&j.date<=offset(7)},
+        {key:"later",label:"Later",test:j=>j.date>offset(7)},
+      ];
+      const used=new Set();
+      listBody=groups.map(g=>{
+        const list=jobs.filter(j=>!used.has(j.id)&&g.test(j)); list.forEach(j=>used.add(j.id));
+        if(!list.length)return"";
+        return `<div class="agenda-grp"><div class="agenda-head ${g.cls||""}">${g.label} <span class="cnt">${list.length}</span></div>${list.map(j=>jobCard(j)).join("")}</div>`;
+      }).join("");
+    }
+    body=listHead+listBody;
   }
   $("#content").innerHTML=head+body;
   document.querySelectorAll("[data-sf]").forEach(b=>b.onclick=()=>{schedFilter=b.dataset.sf;renderSchedule();});
-  document.querySelectorAll("[data-sv]").forEach(b=>b.onclick=()=>{schedView=b.dataset.sv;uiSet({schedView});renderSchedule();});
   document.querySelectorAll("[data-dnav]").forEach(b=>b.onclick=()=>{
     const delta=+b.dataset.dnav;
     if(!delta){ schedDay=today(); }
     else { const d=new Date(schedDay+"T12:00:00"); d.setDate(d.getDate()+delta); schedDay=localISO(d); }
     renderSchedule();
   });
-  const sa=$("#sched-add"); if(sa) sa.onclick=()=>openJob(null);
+  const sv=$("#sched-view"); if(sv) sv.onchange=()=>{schedView=sv.value;uiSet({schedView});renderSchedule();};
+  const ss=$("#sched-search"); if(ss) ss.onclick=()=>{view="customers";custSearchOpen=true;render();};
   const ea=$("#empty-add2"); if(ea) ea.onclick=()=>openJob(null);
   const e3=$("#empty-add3"); if(e3) e3.onclick=()=>openJob(null);
   bindJobCards();
 }
-/* Day timeline: one ISO day, 6AM–9PM hour rows + an Anytime bucket. */
-function renderDayTimeline(){
+/* Shared floating header for both Day and List views: dow/date/rev block (left) + day-nav + view pill + search. */
+function schedHeader(){
   const d=new Date(schedDay+"T12:00:00"); // noon guard — no UTC rollover
   const dow=d.toLocaleDateString(undefined,{weekday:"long"});
-  const date=d.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+  const date=d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
+  const jobs=db.jobs.filter(j=>j.date===schedDay&&j.status!=="cancelled");
+  const rev=jobs.reduce((s,j)=>s+(j.status==="completed"?(+j.collected||0):(+j.price||0)),0);
+  return `<div class="tl-head">
+    <div class="tlh-wrap">
+      <div class="tlh-dow">${esc(dow)}</div>
+      <div class="tlh-date">${esc(date)}</div>
+      <div class="tl-rev">Total rev: <span style="color:var(--cyan);font-weight:800">${money(rev)}</span>${
+        schedDay!==today()?` · <button class="btn sm" data-dnav="0">Today</button>`:""}</div>
+    </div>
+    <button class="nb" data-dnav="-1">‹</button>
+    <button class="nb" data-dnav="1">›</button>
+    <div class="fpill">${schedView==="day"?"Day":"List"} ⌄
+      <select id="sched-view" aria-label="Schedule view">
+        <option value="day" ${schedView==="day"?"selected":""}>Day</option>
+        <option value="list" ${schedView==="list"?"selected":""}>List</option>
+      </select>
+    </div>
+    <button class="fcir" id="sched-search" title="Search">⌕</button>
+  </div>`;
+}
+/* Day timeline: one ISO day, 6AM–9PM hour rows + an Anytime bucket. */
+function renderDayTimeline(){
   const jobs=db.jobs.filter(j=>j.date===schedDay&&j.status!=="cancelled")
     .sort((a,b)=>(a.time||"").localeCompare(b.time||""));
-  const rev=jobs.reduce((s,j)=>s+(j.status==="completed"?(+j.collected||0):(+j.price||0)),0);
 
-  const head=`<div class="tl-head">
-      <button class="nb" data-dnav="-1">‹</button>
-      <div><div class="tlh-dow">${esc(dow)}</div><div class="tlh-date">${esc(date)}</div></div>
-      <button class="nb" data-dnav="1">›</button>
-    </div>
-    <div class="tl-rev">Total rev: <span style="color:var(--cyan);font-weight:800">${money(rev)}</span>${
-      schedDay!==today()?` · <button class="btn sm" data-dnav="0">Today</button>`:""}</div>`;
-
-  if(!jobs.length) return head+`<div class="panel"><div class="empty">Nothing booked this day.<br><button class="btn btn-primary" id="empty-add3">＋ New Job</button></div></div>`;
+  if(!jobs.length) return `<div class="panel"><div class="empty">Nothing booked this day.<br><button class="btn btn-primary" id="empty-add3">＋ New Job</button></div></div>`;
 
   const anytime=jobs.filter(j=>!j.time);
   let body=anytime.length?`<div class="tl-row"><div class="tl-hour">Anytime</div><div class="tl-slot">${anytime.map(tlCard).join("")}</div></div>`:"";
@@ -947,15 +972,17 @@ function renderDayTimeline(){
     const ap=h>=12?"PM":"AM", hh=((h+11)%12)+1;
     body+=`<div class="tl-row"><div class="tl-hour">${hh} ${ap}</div><div class="tl-slot">${list.map(tlCard).join("")}</div></div>`;
   }
-  return head+body;
+  return body;
 }
 function tlCard(j){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=j.status==="completed";
+  const range=j.time?tlTimeRange(j.time):"";
   return `<div class="tl-card ${done?"done":""}" data-jobcard="${j.id}">
     <div class="n">${done?"✓ ":""}${esc(c.name)}</div>
-    <div class="s">${esc(j.service)}${j.time?" · "+fmtTime(j.time):""}</div>
-    <div class="p">${money(j.price)}</div>
+    <div class="s">${esc(j.service)}</div>
+    ${range?`<div class="tr">${esc(range)}</div>`:""}
+    <div class="p">${money2(j.price)}</div>
   </div>`;
 }
 function jobCard(j,overdueFlag){
@@ -997,41 +1024,65 @@ function custListRows(){
   list=sortCustomers(list);
   return list;
 }
+const CUST_STAGES=["lead","active","inactive"],CUST_STAGE_LABEL={lead:"Lead",active:"Active",inactive:"Inactive"};
+const CUST_SORT_CYCLE=[["name-asc","Name A–Z"],["paid-desc","Paid: high → low"],["recent","Most recent service"]];
+function custStageMove(id,d){ // ‹ › on a card: shift status one step, log it, repaint
+  const c=custById(id); if(!c)return;
+  const i=CUST_STAGES.indexOf(c.status), n=i+d;
+  if(i<0||n<0||n>=CUST_STAGES.length)return;
+  const to=CUST_STAGE_LABEL[CUST_STAGES[n]];
+  c.log=c.log||[]; c.log.push({t:Date.now(),m:"↔ Stage: "+CUST_STAGE_LABEL[c.status]+" → "+to});
+  c.status=CUST_STAGES[n];
+  save(); toast(c.name+" → "+to); paintCustRows();
+}
 function paintCustRows(){ // repaint just the list — the search box keeps focus while typing
-  const list=custListRows();
-  const GROUPS=[["lead","Leads","var(--amber)"],["active","Active","var(--green)"],["inactive","Inactive","var(--muted)"]];
-  $("#cust-list").innerHTML=list.length?GROUPS.map(([id,label,color])=>{
+  const all=custListRows(), pages=Math.max(1,Math.ceil(all.length/custPageSize));
+  custPage=Math.min(Math.max(custPage,0),pages-1);
+  const list=all.slice(custPage*custPageSize,(custPage+1)*custPageSize);
+  const GROUPS=[["lead","Leads","var(--amber)","lead"],["active","Active","var(--green)","client"],["inactive","Inactive","var(--muted)","client"]];
+  $("#cust-list").innerHTML=list.length?GROUPS.map(([id,label,color,noun])=>{
     const rows=list.filter(c=>c.status===id);
     if(!rows.length)return"";
-    return `<div class="lead-grp"><div class="lg-head"><span class="lg-bar" style="background:${color}"></span><div><div class="lg-label">${label}</div><div class="lg-count">${rows.length} client${rows.length===1?"":"s"}</div></div></div>${rows.map(custCard).join("")}</div>`;
+    const tot=rows.reduce((s,c)=>s+custCollected(c.id),0);
+    return `<div class="lead-grp"><div class="lg-head"><span class="lg-bar" style="background:${color}"></span><div><div class="lg-label">${label}</div><div class="lg-count">${rows.length} ${noun}${rows.length===1?"":"s"}</div></div><span class="lg-total">${money(tot)}</span></div>${rows.map(custCard).join("")}</div>`;
   }).join(""):
     `<div class="empty"><div class="big">👥</div>${query?"No one matches that search.":"No customers here yet."}<br><button class="btn btn-primary" id="empty-cust">＋ Add a customer</button></div>`;
-  $("#cust-shown").textContent=list.length+" shown";
-  $("#cust-total").textContent=list.length+(list.length===1?" total client":" total clients");
+  const pager=pages>1?`<button class="fcir" data-cpage="-1"${custPage<=0?' disabled style="opacity:.3"':""}>‹</button>
+      <button class="fcir" data-cpage="1"${custPage>=pages-1?' disabled style="opacity:.3"':""}>›</button>`:"";
+  $("#cust-foot").innerHTML=`<span class="lead-total" id="cust-total">${all.length} total lead${all.length===1?"":"s"}</span>
+    <button class="fpill" id="cust-pagesize" title="Rows per page">${custPageSize} | page</button>${pager}`;
   const ec=$("#empty-cust"); if(ec) ec.onclick=()=>openCust(null);
   document.querySelectorAll("[data-cust]").forEach(el=>el.onclick=()=>openCust(+el.dataset.cust));
+  document.querySelectorAll("[data-stageback]").forEach(b=>b.onclick=e=>{e.stopPropagation();custStageMove(+b.dataset.stageback,-1);});
+  document.querySelectorAll("[data-stagefwd]").forEach(b=>b.onclick=e=>{e.stopPropagation();custStageMove(+b.dataset.stagefwd,1);});
+  document.querySelectorAll("[data-cpage]").forEach(b=>b.onclick=()=>{custPage+=+b.dataset.cpage;paintCustRows();});
+  const ps=$("#cust-pagesize"); if(ps) ps.onclick=()=>{custPageSize={25:50,50:100}[custPageSize]||25;custPage=0;paintCustRows();};
 }
 function renderCustomers(){
-  const counts={all:db.customers.length,lead:db.customers.filter(c=>c.status==="lead").length,active:db.customers.filter(c=>c.status==="active").length,inactive:db.customers.filter(c=>c.status==="inactive").length};
-  const sortOpts=[["name-asc","Name A–Z"],["name-desc","Name Z–A"],["paid-desc","Paid: high → low"],["paid-asc","Paid: low → high"],["recent","Most recent service"],["oldest","Longest since service"]].map(([v,l])=>`<option value="${v}" ${custSort===v?"selected":""}>${l}</option>`).join("");
-  const seg=`<div class="seg">
-    <button data-cf="all" class="${custFilter==="all"?"active":""}">All ${counts.all}</button>
-    <button data-cf="lead" class="${custFilter==="lead"?"active":""}">Leads ${counts.lead}</button>
-    <button data-cf="active" class="${custFilter==="active"?"active":""}">Active ${counts.active}</button>
-    <button data-cf="inactive" class="${custFilter==="inactive"?"active":""}">Inactive ${counts.inactive}</button>
-  </div>`;
+  custPage=0;
+  const stages=[["all","All leads"],["lead","Leads"],["active","Active"],["inactive","Inactive"]];
+  const label=(stages.find(s=>s[0]===custFilter)||stages[1])[1];
+  const opts=stages.map(([v,l])=>`<option value="${v}" ${custFilter===v?"selected":""}>${l}</option>`).join("");
+  const searching=custSearchOpen||!!query;
   $("#content").innerHTML=`
-    <div class="toolbar" style="margin-bottom:10px"><div class="search" style="max-width:none;flex:1"><span class="mag">⌕</span><input id="search" type="text" aria-label="Search clients"></div>
-      <button class="btn btn-primary" id="cust-add2">＋ Customer</button></div>
-    <div class="toolbar">${seg}<select id="cust-sort" title="Sort customers">${sortOpts}</select><span class="hint" id="cust-shown"></span></div>
+    <div class="lx-bar">
+      <div class="lx-title">${label} <span class="lx-chev">⌄</span><select id="cust-stage" aria-label="Filter by stage">${opts}</select></div>
+      <button class="fcir" id="cust-search-btn" title="Search" style="margin-left:auto">⌕</button>
+      <button class="fcir" id="cust-sort-btn" title="Sort">☰</button>
+      <button class="fcir" id="cust-add2" title="New customer">＋</button>
+    </div>
+    ${searching?`<div class="toolbar" style="margin-bottom:10px"><div class="search" style="max-width:none;flex:1"><span class="mag">⌕</span><input id="search" type="text" aria-label="Search clients"></div></div>`:""}
     <div id="cust-list"></div>
-    <div class="lead-total" id="cust-total"></div>`;
-  $("#search").value=query;
-  $("#search").addEventListener("input",e=>{query=e.target.value;paintCustRows();});
+    <div class="cust-foot" id="cust-foot"></div>`;
+  if(searching){const s=$("#search"); s.value=query;
+    s.addEventListener("input",e=>{query=e.target.value;custPage=0;paintCustRows();}); s.focus();}
   paintCustRows();
-  document.querySelectorAll("[data-cf]").forEach(b=>b.onclick=()=>{custFilter=b.dataset.cf;renderCustomers();});
-  $("#cust-sort").onchange=e=>{custSort=e.target.value;renderCustomers();};
-  const ca=$("#cust-add2"); if(ca) ca.onclick=()=>openCust(null);
+  $("#cust-stage").onchange=e=>{custFilter=e.target.value;renderCustomers();};
+  $("#cust-search-btn").onclick=()=>{custSearchOpen=!custSearchOpen;if(!custSearchOpen)query="";renderCustomers();};
+  $("#cust-sort-btn").onclick=()=>{
+    const i=CUST_SORT_CYCLE.findIndex(s=>s[0]===custSort), nx=CUST_SORT_CYCLE[(i+1)%CUST_SORT_CYCLE.length];
+    custSort=nx[0]; renderCustomers(); toast("Sorted: "+nx[1]);};
+  $("#cust-add2").onclick=()=>openCust(null);
 }
 function custMatches(c,q){q=q.toLowerCase();return [c.name,c.phone,c.email,c.street,c.city,c.zip,(c.tags||[]).join(" "),c.notes].some(v=>(v||"").toLowerCase().includes(q));}
 function sortCustomers(list){
@@ -1048,13 +1099,19 @@ function sortCustomers(list){
   return list.sort(cmp[custSort]||cmp["name-asc"]);
 }
 function custCard(c){
-  const paid=custCollected(c.id); const next=custNext(c.id);
+  const paid=custCollected(c.id), i=CUST_STAGES.indexOf(c.status);
+  const arrow=(d,ch,attr)=>`<button class="lc-arrow"${(i>=0&&i+d>=0&&i+d<CUST_STAGES.length)?` data-${attr}="${c.id}"`:' disabled style="opacity:.3"'}>${ch}</button>`;
+  let pills=(c.tags||[]).slice(0,2).map(t=>`<span class="ph-pill" style="margin-top:0">${esc(t)}</span>`).join("");
+  if(c.followup){const d=Math.round((new Date(c.followup+"T00:00:00")-new Date(today()+"T00:00:00"))/864e5);
+    pills+=`<span class="lchip" title="Follow-up ${esc(c.followup)}">${d>=0?d+"d":"due"}</span>`;}
   return `<div class="lead-card" data-cust="${c.id}">
+      ${arrow(-1,"‹","stageback")}
       <div class="avatar" style="background:${avatarColor(c.name)}">${esc(initials(c.name))}</div>
       <div class="lc-mid"><div class="nm">${esc(c.name)}</div>
-        <div class="sub">${c.phone?esc(fmtPhone(c.phone)):"—"}</div>
-        <div class="sub lc-next">${next?`Next: ${fmtDateShort(next.date)} · ${esc(next.service)}`:(c.tags&&c.tags.length?esc(c.tags.join(", ")):"—")}</div></div>
-      <div class="lc-right">${paid>0?`<span class="lchip">${money(paid)}</span>`:""}<span class="lc-chev">›</span></div>
+        ${c.phone?`<div><span class="ph-pill">${esc(fmtPhone(c.phone))}</span></div>`:""}
+        ${pills?`<div class="lc-tags">${pills}</div>`:""}</div>
+      <div class="lc-right">${paid>0?`<span class="lchip">${money(paid)}</span>`:""}</div>
+      ${arrow(1,"›","stagefwd")}
     </div>`;
 }
 
@@ -1493,18 +1550,26 @@ function quoteMonths(iso){
 }
 function openQuote(id){
   const j=db.jobs.find(x=>x.id===id); if(!j)return;
-  const tiles=quoteMonths(j.date).map(t=>`<div class="qm${t.hit?" qm-hit":""}">${MON_SHORT[t.m]}<small>${t.y}</small>${t.hit?`<span class="vis">VISIT</span>`:""}</div>`).join("");
+  const tiles=quoteMonths(j.date).map(t=>`<div class="qm${t.hit?" qm-hit":""}">${t.hit?`<span class="vis">VISIT</span>`:""}${MON_SHORT[t.m]}<small>${t.y}</small></div>`).join("");
   const foot=j.signature
     ? `<div style="text-align:center"><img src="${esc(j.signature)}" alt="signature" style="max-height:90px;max-width:100%">
          <div style="color:var(--muted);font-size:12.5px;margin-top:6px">Signed ${esc(fmtDateShort(localISO(new Date(j.signedAt||Date.now()))))}</div></div>`
-    : `<button class="btn btn-primary" id="quote-accept" style="width:100%;justify-content:center;padding:13px">Accept &amp; Sign</button>`;
+    : `<button class="btn btn-primary" id="quote-accept" style="width:100%;justify-content:center;padding:14px;font-size:15px">Accept &amp; Sign</button>`;
   $("#quote-modal").innerHTML=`
     <div class="modal-head" style="justify-content:flex-start"><button class="x" id="quote-back" style="border-radius:50%">&lsaquo;</button></div>
     <div class="modal-body" style="padding:22px;text-align:center">
-      <div style="font-size:34px;font-weight:800">${money(j.price)}</div>
+      <div style="font-size:36px;font-weight:800">${money2(j.price)}</div>
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);font-weight:700">Per visit</div>
-      <div style="font-weight:700;font-size:15px;margin-top:14px">${esc(j.service)}</div>
-      ${j.notes?`<div class="qnotes">${esc(j.notes)}</div>`:""}
+      <div style="font-weight:600;margin-top:8px">1 visit</div>
+      <div style="color:var(--faint);font-size:12px">Billed on service date</div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);font-weight:800;margin-top:18px;text-align:left">Services</div>
+      <div style="display:flex;gap:12px;text-align:left;margin:8px 0 4px;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-weight:700;font-size:14.5px">${esc(j.service)}</div>
+          ${j.notes?`<div class="qnotes">${esc(j.notes)}</div>`:""}
+        </div>
+        <div style="font-weight:700;white-space:nowrap">${money2(j.price)}</div>
+      </div>
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);font-weight:800;margin-top:18px">Service schedule</div>
       <div class="qgrid">${tiles}</div>
       <div id="quote-foot">${foot}</div>
@@ -1598,10 +1663,14 @@ function insertAt(ta,text){const s=ta.selectionStart,e=ta.selectionEnd;ta.value=
 
 
 /* ---------------- Nav / global ---------------- */
-document.querySelectorAll("#nav a,#bottombar a").forEach(a=>a.onclick=()=>{view=a.dataset.view;render();});
+function drawer(open){$("#drawer").classList.toggle("open",open);$("#drawer-veil").classList.toggle("show",open);}
+document.querySelectorAll("#nav a").forEach(a=>a.onclick=()=>{view=a.dataset.view;render();drawer(false);});
+$("#menu-btn").onclick=()=>drawer(!$("#drawer").classList.contains("open"));
+$("#drawer-veil").onclick=()=>drawer(false);
 $("#add-job").onclick=()=>openJob(null);
-$("#open-settings").onclick=()=>{view="settings";render();};
+$("#fab-add").onclick=()=>openJob(null);
 document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&$("#drawer").classList.contains("open")){drawer(false);return;}
   if(e.key==="Escape"){closeQuote();closePaste();closeSms();closeJob();closeCust();closeQuick();return;}
   // Ctrl/⌘+Enter saves whichever editor is open — job takes priority since it can stack over the customer modal
   if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){
@@ -1805,7 +1874,7 @@ function paintSyncChip(){
 function paintSyncCard(){
   const st=$("#sync-state");if(!st)return;
   if(!syncToken())st.textContent="off — paste your GitHub token below (one-time, both devices)";
-  else if(syncState==="err")st.textContent="⚠ error — check the token and click the sidebar chip to retry";
+  else if(syncState==="err")st.textContent="⚠ error — check the token and click the sync chip in the menu to retry";
   else st.textContent="ON — this device pushes every change and pulls on open ✓";
 }
 /* Pairing: entering the token on a device decides pull-vs-push explicitly (never clobbers blindly). */
@@ -2365,7 +2434,7 @@ if(__bay&&(__bay.added||__bay.jobs))setTimeout(()=>toast(`📋 Bayview blitz: ${
 if(__cont)setTimeout(()=>toast(`📇 Contacts synced: ${__cont.attached} phones attached, ${__cont.created} added, ${__cont.dup} already in CRM${__cont.skipped.length?`, ${__cont.skipped.length} ambiguous (noted)`:""}`,"ok"),1900);
 initAutoBackup();setInterval(paintBackupChip,60000);
 syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
-// iOS home-screen app: guarantee the topbar clears the status bar / Dynamic Island,
+// iOS home-screen app: guarantee the floating chrome clears the status bar / Dynamic Island,
 // even when env(safe-area-inset-top) resolves to 0 (iOS caches install-time settings).
 (function fixSafeArea(){
   if(!navigator.standalone)return; // true only for iOS Add-to-Home-Screen apps
@@ -2374,7 +2443,7 @@ syncPull();paintSyncChip();setInterval(paintSyncChip,60000);
   document.body.appendChild(probe);
   const inset=probe.offsetHeight; probe.remove();
   const pad=Math.max(inset,59); // Dynamic Island reports ~59px; fall back to that when env() lies
-  document.documentElement.style.setProperty("--safetop",pad+"px"); // topbar AND modal overlays read this
+  document.documentElement.style.setProperty("--safetop",pad+"px"); // content, drawer AND modal overlays read this
 })();
 
 if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw.js");
