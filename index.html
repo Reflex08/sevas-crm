@@ -1779,13 +1779,17 @@ function importContacts(){
 
 /* ===BAYVIEW_IMPORT_START=== */
 // Bayview Village D2D blitz (2026-07-14, reps Kyrie/Franz/Daniel/Daviti). One-time, phone-deduped.
-const BAYVIEW_IMPORT={version:6,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
+const BAYVIEW_IMPORT={version:7,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
 function importBayview(){
   const digits=p=>(p||"").replace(/\D/g,"").replace(/^1/,"");
   let added=0,jobs=0;
   for(const p of BAYVIEW_IMPORT.people){
     let c=db.customers.find(x=>p.phone?(digits(x.phone)&&digits(x.phone)===digits(p.phone))
       :(x.name||"").trim().toLowerCase()===p.name.toLowerCase()); // phoneless people dedupe by name
+    if(!c&&p.phone){ // unique phoneless namesake = same person, attach the phone (contacts-import policy)
+      const cands=db.customers.filter(x=>!digits(x.phone)&&(x.name||"").trim().toLowerCase()===p.name.toLowerCase());
+      if(cands.length===1){c=cands[0];c.phone=p.phone;}
+    }
     // v1/v2 landed these in July — slide any already-imported bookings (and stale follow-ups) to the real August dates
     if(c){
       const OLD=["2026-07-10","2026-07-16","2026-07-17"];
@@ -1802,10 +1806,13 @@ function importBayview(){
       if(p.street&&!c.street)c.street=p.street;
       if(p.note&&!(c.notes||"").includes(p.note))c.notes=c.notes?(c.notes+"\n"+p.note):p.note;
       if(p.followup&&!c.followup)c.followup=p.followup;
-      if(p.status==="active"&&c.status==="lead")c.status="active"; // Janice closed
+      if(p.status==="active"&&c.status==="lead")c.status="active"; // closed leads upgrade
     }
-    if(p.dropNote){ // stale "TBD / quoted" reminders die once the booking is real
-      c.notes=(c.notes||"").split("\n").filter(l=>!/TBD|Quoted \$149/.test(l)).join("\n").trim();
+    if(p.rename)c.name=p.name;           // real name learned later (e.g. full name replaces a partial)
+    if(p.setStatus)c.status=p.setStatus; // lost/dead entries downgrade
+    if(p.clearFollowup)c.followup="";
+    if(p.dropNote){ // stale "TBD / quoted / unknown" reminders die once resolved
+      c.notes=(c.notes||"").split("\n").filter(l=>!/TBD|Quoted \$149|Address still unknown/.test(l)).join("\n").trim();
       if(c.followup==="2026-08-12")c.followup="";
     }
     if(p.slide)db.jobs.forEach(x=>{ // date correction for an already-created job
