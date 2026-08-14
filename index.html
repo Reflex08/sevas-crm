@@ -690,6 +690,11 @@ function heroCard(){
   if(bestDay>0)opts.push(`Best day of ${mon}: <b>${money(bestDay)}</b>. Beat it, ${name}. ⚡`);
   if(quarter>0)opts.push(`<b>${money(quarter)}</b> this quarter. The season's paying off, ${name}. 📈`);
   if(year>0)opts.push(`<b>${money(year)}</b> collected in ${Y}. Real business now, ${name}. 🏗️`);
+  const GOAL=50000; // owner's target: $50k profit this year
+  if(year>0){const pct=Math.round(year/GOAL*100);
+    if(year<GOAL){opts.push(`<b>${money(year)}</b> of the <b>$50k</b> year — ${pct}% there, ${name}. 🏁`);
+      opts.push(`<b>${money(GOAL-year)}</b> left to the $50k year. Chip it down, ${name}. ⛏️`);}
+    else opts.push(`$50k goal SMASHED — <b>${money(year)}</b> this year, ${name}. 🍾`);}
   if(allTime>0){
     opts.push(`<b>${money(allTime)}</b> all-time. From one squeegee to all this, ${name}. 🏆`);
     opts.push(`Lifetime: <b>${money(allTime)}</b> across <b>${custN}</b> customers. Empire in progress, ${name}. 👑`);}
@@ -1774,12 +1779,13 @@ function importContacts(){
 
 /* ===BAYVIEW_IMPORT_START=== */
 // Bayview Village D2D blitz (2026-07-14, reps Kyrie/Franz/Daniel/Daviti). One-time, phone-deduped.
-const BAYVIEW_IMPORT={version:5,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
+const BAYVIEW_IMPORT={version:6,people:[]}; // public copy: blitz data stripped — arrives via cloud sync
 function importBayview(){
   const digits=p=>(p||"").replace(/\D/g,"").replace(/^1/,"");
   let added=0,jobs=0;
   for(const p of BAYVIEW_IMPORT.people){
-    let c=db.customers.find(x=>digits(x.phone)&&digits(x.phone)===digits(p.phone));
+    let c=db.customers.find(x=>p.phone?(digits(x.phone)&&digits(x.phone)===digits(p.phone))
+      :(x.name||"").trim().toLowerCase()===p.name.toLowerCase()); // phoneless people dedupe by name
     // v1/v2 landed these in July — slide any already-imported bookings (and stale follow-ups) to the real August dates
     if(c){
       const OLD=["2026-07-10","2026-07-16","2026-07-17"];
@@ -1802,9 +1808,14 @@ function importBayview(){
       c.notes=(c.notes||"").split("\n").filter(l=>!/TBD|Quoted \$149/.test(l)).join("\n").trim();
       if(c.followup==="2026-08-12")c.followup="";
     }
+    if(p.slide)db.jobs.forEach(x=>{ // date correction for an already-created job
+      if(x.customerId===c.id&&x.date===p.slide[0]&&x.status!=="cancelled")x.date=p.slide[1];});
     for(const j of (p.jobs||[])){
       const have=db.jobs.find(x=>x.customerId===c.id&&x.date===j.date&&x.service===j.service&&x.status!=="cancelled");
-      if(have){if(j.time&&have.time!==j.time)have.time=j.time;continue;} // fills missing times AND applies time corrections
+      if(have){ // corrections for jobs that already landed: time, and scheduled → done & paid
+        if(j.time&&have.time!==j.time)have.time=j.time;
+        if(j.done&&have.status!=="completed"){have.status="completed";have.collected=have.collected||j.price;have.completedAt=Date.now();}
+        continue;}
       const done=!!j.done;
       db.jobs.push({id:db.seqJ++,customerId:c.id,service:j.service,price:j.price,date:j.date,time:j.time,
         recurring:"none",status:done?"completed":"scheduled",collected:done?j.price:0,payMethod:"",
