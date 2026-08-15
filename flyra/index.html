@@ -141,14 +141,13 @@
 
   /* ---------- Greeting + stats ---------- */
   .hero{margin:4px 0 22px}
-  .fh-greet{font-size:30px;font-weight:700;font-style:italic;letter-spacing:-.5px;line-height:1.15}
-  .fh-name{font-size:30px;font-weight:700;font-style:italic;color:var(--brand);line-height:1.15}
-  .fh-sub{color:var(--faint);font-style:italic;margin-top:3px;font-size:14px}
+  .gr-word{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+  .fh-name{font-size:27px;font-weight:700;font-style:italic;color:var(--brand);line-height:1.15;margin-top:2px}
   .big-num{font-size:32px;font-weight:800;font-style:italic;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:2px 0 6px}
   .ftab{border:0;background:transparent;color:var(--muted);font-weight:700;font-size:13.5px;padding:7px 14px;border-radius:999px}
   .ftab.active{color:var(--purple)}
   .lb-row{display:flex;align-items:center;gap:12px;padding:10px 18px;border-top:1px solid var(--line)}
-  .lb-rank{color:var(--muted);font-size:12px;width:18px;flex-shrink:0;font-weight:700}
+  .lb-rank{color:var(--muted);font-size:13px;width:18px;flex-shrink:0;font-weight:700}
   .lb-comm{color:var(--brand);font-weight:800;margin-left:auto;font-variant-numeric:tabular-nums}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:14px;margin-bottom:22px}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
@@ -1130,7 +1129,19 @@ function shell(title,sub,inner){
     '<div class="page-head"><div><div class="ph-title">'+esc(title)+'</div>'+
     (sub?'<div class="ph-sub">'+esc(sub)+'</div>':'')+'</div></div>'+inner;
 }
-function greeting(){const h=new Date().getHours();return h<12?"Good morning":h<18?"Good afternoon":"Good evening";}
+function greetWord(h){return h<12?"Good morning":h<18?"Good afternoon":"Good evening";}
+/* Dashboard hero greeting (owner + rep) — whoUser()'s first name, falling back to the business
+   name (its own first word, possessive stripped) or "Seva" if neither is on file. Shared by
+   renderDashboard and renderRepHome so the two screens can never drift apart. */
+function heroFirstName(){
+  const me=whoUser();
+  if(me&&me.name)return firstName(me.name);
+  return firstName((db.settings.business&&db.settings.business.name||"").replace(/'s$/i,""))||"Seva";
+}
+function heroGreetHTML(){
+  return '<div class="hero"><div class="gr-word">'+esc(greetWord(new Date().getHours()))+'</div>'+
+    '<div class="fh-name">'+esc(heroFirstName())+'</div></div>';
+}
 
 /* Dashboard-only UI state — resets on reload, never dirties `db`. chartMode is the one exception:
    it's a display preference, so it rides in uiPref like schedView/payPeriod already do. */
@@ -1140,6 +1151,13 @@ let chartMode=uiPref().chartMode||"line"; // line | bar — dashboard hero chart
 let lbMetric="sales";       // sales | commission
 const PILL_SEL="border-radius:999px;padding:6px 12px;background:#0d0e12;border:1px solid var(--line);color:var(--ink);font-weight:600;font-size:12.5px";
 
+/* Hero title above the big number: "<Month Year> Revenue" for the default 1M range, the ARR
+   name on the ARR tab, else the range-label pill text (already computed for the pill) + " Revenue". */
+function revenueTitle(){
+  if(dashRevTab==="arr")return "Annual Recurring Revenue";
+  if(dashRevPeriod==="month")return new Date().toLocaleDateString(undefined,{month:"long",year:"numeric"})+" Revenue";
+  return heroRangeLabel()+" Revenue";
+}
 function revenuePanel(){
   const isArr=dashRevTab==="arr";
   const series=heroSeries();
@@ -1164,11 +1182,11 @@ function revenuePanel(){
         '<span style="'+PILL_SEL+'">'+esc(heroRangeLabel())+'</span>'+
       '</div>')+
     '</div>'+
-    '<div class="sec" style="margin:0 0 4px;color:#fff;font-size:12px;font-weight:700">'+(isArr?"ARR":"Revenue")+'</div>'+
+    '<div class="sec" style="margin:0 0 4px;color:#fff;font-size:12px;font-weight:700">'+esc(revenueTitle())+'</div>'+
     '<div class="big-num">'+esc(money(big))+'</div>'+
     body+
+    '<div class="hint">Avg: '+esc(money2(stats.dailyAvg))+'/day</div>'+
     '<div class="chip-row">'+
-      '<div class="schip"><div class="l" style="text-transform:uppercase;font-style:normal">Daily avg</div><div class="n">'+esc(money2(stats.dailyAvg))+'</div></div>'+
       '<div class="schip"><div class="l" style="text-transform:uppercase;font-style:normal">Peak</div><div class="n">'+esc(money2(stats.peak))+'</div></div>'+
     '</div>'+
     '<div style="text-align:right;color:var(--muted);font-size:12px;margin-top:8px">Updated '+esc(fmtWhen(Date.now()))+'</div>'+
@@ -1187,8 +1205,8 @@ function leaderboardPanel(){
         '<div class="lb-rank">'+(i+1)+'</div>'+
         '<div class="avatar" style="background:'+(r.user.color||avatarColor(r.user.name))+'">'+esc(initials(r.user.name))+'</div>'+
         '<div><div class="nm">'+esc(r.user.name)+'</div>'+
-          '<div class="sub">'+r.count+' job'+(r.count!==1?"s":"")+' · '+
-            (bySales?esc(money2(r.comm))+' comm':esc(money(r.sales))+' sold')+'</div></div>'+
+          '<div class="sub">'+r.count+' job'+(r.count!==1?"s":"")+' sold · '+
+            (bySales?esc(money2(r.comm)):esc(money(r.sales)))+'</div></div>'+
         '<div class="lb-comm">'+esc(money2(bySales?r.sales:r.comm))+'</div>'+
       '</div>').join("")
       :'<div class="panel-pad empty">No sales logged yet.</div>')+
@@ -1217,11 +1235,8 @@ function activityPanel(){
     '</div></div>';
 }
 function renderDashboard(){
-  const name=firstName((db.settings.business.name||"").replace(/'s$/i,""))||"there";
   $("#content").innerHTML=
-    '<div class="hero"><div class="fh-greet">'+esc(greeting())+',</div>'+
-    '<div class="fh-name">'+esc(name)+'</div>'+
-    '<div class="fh-sub">Welcome to your dashboard</div></div>'+
+    heroGreetHTML()+
     revenuePanel()+leaderboardPanel()+todayPanel()+activityPanel();
   document.querySelectorAll("[data-rtab]").forEach(b=>b.onclick=()=>{dashRevTab=b.dataset.rtab;renderDashboard();});
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;renderDashboard();});
@@ -1252,7 +1267,7 @@ function repLeaderPanel(me){
       '<div class="lb-rank">'+(n===0?"👑":(n+1))+'</div>'+
       '<div class="avatar" style="background:'+esc(r.user.color||avatarColor(r.user.name))+'">'+esc(initials(r.user.name))+'</div>'+
       '<div><div class="nm">'+esc(r.user.name)+'</div>'+
-        '<div class="sub">'+r.count+' job'+(r.count!==1?"s":"")+' · '+esc(money(r.sales))+'</div></div>'+
+        '<div class="sub">'+r.count+' job'+(r.count!==1?"s":"")+' sold · '+esc(money(r.sales))+'</div></div>'+
       '<div class="lb-comm">'+esc(money2(val(r)))+'</div>'+
     '</div>');
   // The delta sits directly under their own row: one number, one name, no maths to do.
@@ -1347,9 +1362,7 @@ function renderRepHome(){
   const me=whoUser();
   if(!me){renderWhoPicker();return;}
   $("#content").innerHTML=
-    '<div class="hero"><div class="fh-greet">'+esc(greeting())+',</div>'+
-    '<div class="fh-name">'+esc(firstName(me.name))+'</div>'+
-    '<div class="fh-sub">Here’s your board</div></div>'+
+    heroGreetHTML()+
     repLeaderPanel(me)+repMoneyPanel(me)+repDayPanel(me)+repLeadsPanel(me);
   const m=$("#rep-metric");if(m)m.onchange=()=>{repMetric=m.value;renderRepHome();};
   const p=$("#rep-period");if(p)p.onchange=()=>{repPeriod=p.value;renderRepHome();};
