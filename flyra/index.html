@@ -8,6 +8,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Flyra">
 <meta name="theme-color" content="#07080a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Flyra</title>
 <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="%2307080a"/><text x="32" y="46" font-family="Georgia,serif" font-size="40" font-weight="bold" font-style="italic" text-anchor="middle" fill="%2356b8f5">F</text></svg>'>
 <style>
@@ -246,6 +248,7 @@
   .tl-card .tr{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:1px}
   .tl-card .p{font-weight:800;font-size:14px;margin-top:6px}
   .tl-slot{cursor:pointer}
+  .tl-item{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:rgba(255,255,255,.9);padding:1px 0}
   /* ---------- Week view ---------- */
   .week-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0 4px}
   .week-grid{display:grid;grid-template-columns:repeat(7,minmax(132px,1fr));gap:10px}
@@ -259,6 +262,7 @@
   .week-card .wt{font-size:10px;color:rgba(255,255,255,.7);font-weight:700}
   .week-card .wn{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .week-card .wp{font-size:11.5px;font-weight:800;margin-top:2px}
+  .wk-item{display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:rgba(255,255,255,.9)}
   .week-empty{color:var(--faint);font-size:11.5px;text-align:center;padding:14px 0;font-style:italic}
   /* ---------- Job form crew picker ---------- */
   .crew-row{display:flex;gap:12px;flex-wrap:wrap}
@@ -1345,6 +1349,17 @@ function schedHeader(){
       '<select id="sched-crew" aria-label="Crew filter">'+crewOpts+'</select></div>'+
   '</div>';
 }
+/* Fold same customer+date+time jobs into one display group (data/money untouched — this is
+   rendering-only). Order of first appearance is preserved, so callers must pre-sort jobs. */
+function groupSlotJobs(jobs){
+  const groups=[]; // ponytail: linear find() over a same-day slot list (a handful of jobs) — a Map isn't worth it here
+  for(const j of jobs){
+    const g=groups.find(g=>g.job.customerId===j.customerId&&g.job.date===j.date&&(g.job.time||"")===(j.time||""));
+    if(g)g.jobs.push(j);else groups.push({jobs:[j],job:j});
+  }
+  groups.forEach(g=>{g.services=g.jobs.map(x=>x.service).join(" + ");g.total=g.jobs.reduce((s,x)=>s+(+x.price||0),0);});
+  return groups;
+}
 function tlCard(j){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=j.status==="done";
@@ -1356,17 +1371,33 @@ function tlCard(j){
     '<div class="p">'+money2(j.price)+'</div>'+
   '</div>';
 }
+/* One card per slot GROUP (see groupSlotJobs). A solo group renders exactly like tlCard always
+   did. A merged group shows the combined services/total and one clickable row per job, each
+   still carrying its own data-jobcard so a tap on a row opens that job specifically. */
+function tlGroupCard(g){
+  if(g.jobs.length===1)return tlCard(g.job);
+  const j=g.job,c=custById(j.customerId)||{name:"(deleted customer)"};
+  const done=g.jobs.every(x=>x.status==="done");
+  const range=j.time?tlTimeRange(j.time):"";
+  const rows=g.jobs.map(x=>'<div class="tl-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
+  return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
+    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
+    rows+
+    (range?'<div class="tr">'+esc(range)+'</div>':'')+
+    '<div class="p">'+money2(g.total)+'</div>'+
+  '</div>';
+}
 function renderDayTimeline(){
   const jobs=dayJobs(schedDay);
   if(!jobs.length)return '<div class="panel"><div class="panel-pad empty"><div class="big">🗓️</div>'+
     '<div class="et">Nothing booked this day</div>'+
     '<div style="margin-top:14px"><button class="btn btn-primary" id="empty-add-sched">＋ New Job</button></div></div></div>';
-  const anytime=jobs.filter(j=>!j.time);
-  let body=anytime.length?'<div class="tl-row"><div class="tl-hour">Anytime</div><div class="tl-slot">'+anytime.map(tlCard).join("")+'</div></div>':"";
+  const anytime=groupSlotJobs(jobs.filter(j=>!j.time));
+  let body=anytime.length?'<div class="tl-row"><div class="tl-hour">Anytime</div><div class="tl-slot">'+anytime.map(tlGroupCard).join("")+'</div></div>':"";
   for(let h=6;h<=21;h++){
-    const list=jobs.filter(j=>{if(!j.time)return false;const jh=Math.min(21,Math.max(6,parseInt(j.time,10)||0));return jh===h;});
+    const list=groupSlotJobs(jobs.filter(j=>{if(!j.time)return false;const jh=Math.min(21,Math.max(6,parseInt(j.time,10)||0));return jh===h;}));
     const ap=h>=12?"PM":"AM", hh=((h+11)%12)+1;
-    body+='<div class="tl-row"><div class="tl-hour">'+hh+' '+ap+'</div><div class="tl-slot" data-tlhour="'+h+'">'+list.map(tlCard).join("")+'</div></div>';
+    body+='<div class="tl-row"><div class="tl-hour">'+hh+' '+ap+'</div><div class="tl-slot" data-tlhour="'+h+'">'+list.map(tlGroupCard).join("")+'</div></div>';
   }
   return body;
 }
@@ -1379,13 +1410,25 @@ function weekCard(j){
     '<div class="wp">'+money2(j.price)+'</div>'+
   '</div>';
 }
+function weekGroupCard(g){
+  if(g.jobs.length===1)return weekCard(g.job);
+  const j=g.job,c=custById(j.customerId)||{name:"(deleted customer)"};
+  const done=g.jobs.every(x=>x.status==="done");
+  const rows=g.jobs.map(x=>'<div class="wk-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
+  return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
+    (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
+    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
+    rows+
+    '<div class="wp">'+money2(g.total)+'</div>'+
+  '</div>';
+}
 function renderWeek(){
   const t=today();
   const cols=weekDates(schedDay).map(d=>{
-    const dt=new Date(d+"T12:00:00"), jobs=dayJobs(d);
+    const dt=new Date(d+"T12:00:00"), jobs=groupSlotJobs(dayJobs(d));
     return '<div class="week-col'+(d===t?" today":"")+'" data-wcol="'+d+'">'+
       '<div class="week-col-head">'+esc(dt.toLocaleDateString(undefined,{weekday:"short"}))+'<br>'+dt.getDate()+'</div>'+
-      '<div class="week-col-body">'+(jobs.length?jobs.map(weekCard).join(""):'<div class="week-empty">—</div>')+'</div>'+
+      '<div class="week-col-body">'+(jobs.length?jobs.map(weekGroupCard).join(""):'<div class="week-empty">—</div>')+'</div>'+
     '</div>';
   }).join("");
   return '<div class="week-wrap"><div class="week-grid">'+cols+'</div></div>';
@@ -1401,7 +1444,9 @@ function renderSchedule(){
   const sv=$("#sched-view");if(sv)sv.onchange=()=>{schedView=sv.value;uiSet({schedView});renderSchedule();};
   const sc=$("#sched-crew");if(sc)sc.onchange=()=>{schedCrew=sc.value==="all"?"all":+sc.value;renderSchedule();};
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
-    el.onclick=()=>openJob(+el.dataset.jobcard);
+    // stopPropagation: a merged card nests one data-jobcard row per job (see tlGroupCard/
+    // weekGroupCard) — without it, a tap on a row would bubble to the card's own handler too.
+    el.onclick=e=>{e.stopPropagation();openJob(+el.dataset.jobcard);};
   });
   document.querySelectorAll("[data-tlhour]").forEach(el=>{
     el.onclick=e=>{if(e.target.closest("[data-jobcard]"))return;
