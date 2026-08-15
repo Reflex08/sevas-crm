@@ -865,6 +865,7 @@ function dashChips(){
    e.g. jobs created before this feature existed) do we fall back to the customer's owning rep —
    and even then only if that rep actually has a commission rate on file, so a $0-rate owner
    attributes nothing. */
+function userRate(id){const u=userById(id);return u?+u.commissionPct||0:0;} // the rep's configured rate (Team screen)
 function jobCloserId(j){ // who gets credit for this job at all: its own closer, else the customer's rep
   if(j.closerId)return j.closerId;
   const c=custById(j.customerId);return c?c.ownerId:null;
@@ -1511,19 +1512,16 @@ function jobForm(j,preset){
   const closerOpts='<option value="">— none —</option>'+
     userOptList(closerId).map(u=>'<option value="'+u.id+'" data-pct="'+(+u.commissionPct||0)+'"'+
       (closerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("");
-  const commVal=j?(+j.commissionPct||0):0;
   // A split job (Change A) has no closer/commission select here — splits are data-level only,
   // no editing UI yet — just a read-only summary of who's credited, so saveJobBtn never touches it.
+  // No Commission % input anywhere (owner's order): the rate always comes from the rep's own
+  // configured rate (Team screen). Historical stamps survive unless the closer is changed.
   const splits=j&&Array.isArray(j.splits)?j.splits:[];
   const closerBlock=splits.length?
     '<div class="field"><label>Split</label><div style="padding:9px 0;font-weight:700">'+
       esc("Split: "+splits.map(s=>{const u=userById(s.userId);return (u?u.name:"?")+" "+(+s.pct||0)+"%";}).join(" + "))+
     '</div></div>'
-    :'<div class="grid2">'+
-      '<div class="field"><label>Closed by</label><select id="jf-closer">'+closerOpts+'</select></div>'+
-      '<div class="field" id="jf-commwrap" style="'+(closerId?"":"display:none")+'"><label>Commission %</label>'+
-        '<input id="jf-comm" type="number" min="0" max="100" step="1" value="'+commVal+'"></div>'+
-    '</div>';
+    :'<div class="field"><label>Closed by</label><select id="jf-closer">'+closerOpts+'</select></div>';
   // A merged schedule card (groupSlotJobs) folds several same-visit jobs into one card — editing
   // one now edits the whole visit: the single Service+Price pair is swapped for a checkbox row
   // per service (slotServicesField/applySlotServices), everything else in the form is unchanged.
@@ -1597,12 +1595,15 @@ function saveJobBtn(){
     const closerSel=$("#jf-closer");
     const closerVal=closerSel?closerSel.value:"";
     const closerId=closerVal?+closerVal:null;
-    const commissionPct=closerVal?Math.max(0,Math.min(100,+$("#jf-comm").value||0)):0;
     siblings.forEach(sj=>{
       const shared={customerId:cid,date,time,durMin,notes};
       // Same isSplit guard as the solo path — a split job's credit is data-level only, never
-      // overwritten from this form.
-      if(!(Array.isArray(sj.splits)&&sj.splits.length)){shared.closerId=closerId;shared.commissionPct=commissionPct;}
+      // overwritten from this form. Rate comes from the rep's configured rate; an unchanged
+      // closer keeps the historically stamped pct (special deals survive edits).
+      if(!(Array.isArray(sj.splits)&&sj.splits.length)){
+        shared.closerId=closerId;
+        shared.commissionPct=closerId?(sj.closerId===closerId?+sj.commissionPct||0:userRate(closerId)):0;
+      }
       updateJob(sj.id,shared);
     });
     const entries=[];
@@ -1632,8 +1633,11 @@ function saveJobBtn(){
   const isSplit=!!(curJob&&Array.isArray(curJob.splits)&&curJob.splits.length);
   if(!isSplit){
     const closerVal=$("#jf-closer").value;
-    data.closerId=closerVal?+closerVal:null;
-    data.commissionPct=closerVal?Math.max(0,Math.min(100,+$("#jf-comm").value||0)):0;
+    const closerId=closerVal?+closerVal:null;
+    data.closerId=closerId;
+    // Rate = the rep's configured rate (Team screen); an unchanged closer keeps the job's
+    // historically stamped pct so one-off deals aren't silently rewritten on edit.
+    data.commissionPct=closerId?((curJob&&curJob.closerId===closerId)?+curJob.commissionPct||0:userRate(closerId)):0;
   }
   if(editJob)updateJob(editJob,data);else createJob(data);
   closeModal("job-overlay");render();toast("Job saved","ok");
@@ -1664,12 +1668,6 @@ function openJob(id,preset){
   const svc=$("#jf-service"); // absent in slot mode — the Services field has no single service/price pair
   if(svc)svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
   bindSvcField(); // slot mode only — no-op when #jf-svcfield isn't in the form
-  const closer=$("#jf-closer");
-  if(closer)closer.onchange=()=>{
-    const o=closer.selectedOptions[0],wrap=$("#jf-commwrap");
-    if(closer.value){wrap.style.display="";if(o&&o.dataset.pct!=null)$("#jf-comm").value=o.dataset.pct;}
-    else wrap.style.display="none";
-  };
   $("#jf-save").onclick=saveJobBtn;
   const del=$("#jf-delete");if(del)del.onclick=()=>{
     if(!editJob)return;
