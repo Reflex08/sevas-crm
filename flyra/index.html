@@ -877,6 +877,24 @@ function leaderboardRows(metric,key){
     return {user:u,sales:v.sales,count:v.count,comm:v.comm};
   }).filter(Boolean).sort((a,b)=>metric==="commission"?b.comm-a.comm:b.sales-a.sales);
 }
+/* Rep "My money" drill-down: the exact jobs behind the commission headline, no recomputation.
+   leaderboardRows only ever counts DONE jobs into comm, so doneTotal here is computed the same
+   way (status==="done", jobCommission credited to userId) and always equals that headline number.
+   Booked (not-yet-done) jobs the rep is credited for come back too, but as a separate bookedTotal
+   — they were never in the headline, so they never get folded into it. */
+function repCommRows(userId,key){
+  const rows=[];
+  db.jobs.forEach(j=>{
+    if(j.status==="cancelled"||!jobInPeriod(j.date,key))return;
+    const jc=jobCommission(j);
+    if(!jc||jc.userId!==userId)return;
+    rows.push({job:j,amount:jc.amount,done:j.status==="done"});
+  });
+  rows.sort((a,b)=>(a.job.date||"").localeCompare(b.job.date||""));
+  return {rows,
+    doneTotal:rows.filter(r=>r.done).reduce((s,r)=>s+r.amount,0),
+    bookedTotal:rows.filter(r=>!r.done).reduce((s,r)=>s+r.amount,0)};
+}
 /* Today strip: today's job count + expected revenue (booked scheduled + collected done). */
 function todayStats(){
   const t=today();
@@ -1100,6 +1118,7 @@ function renderDashboard(){
    jobCommission / payoutsSum), so the crew's screen and the owner's payroll can never disagree. */
 let repMetric="sales";   // sales | commission
 let repPeriod="month";   // month | year — payPeriodKey() keys
+let repCommOpen=false;   // "My money" commission drill-down expanded? — module-level, like payOpen
 
 function repSel(id,opts,cur){
   return '<select id="'+id+'" style="'+PILL_SEL+'">'+opts.map(([v,l])=>
@@ -1130,16 +1149,35 @@ function repLeaderPanel(me){
     (rows.length?html.join(""):'<div class="panel-pad empty">No sales logged yet.</div>')+
   '</div>';
 }
+/* One line per job behind the commission drill-down — same shape as payrollJobLine, plus the
+   done/booked status chip the owner's payroll line doesn't need (payroll only ever lists done jobs). */
+function repCommRow(row){
+  const j=row.job,c=custById(j.customerId);
+  return '<div class="jobline" style="cursor:default">'+
+    '<div style="flex:1;min-width:0"><div class="nm">'+esc(c?c.name:"—")+'</div>'+
+      '<div class="sub">'+esc(j.service)+' · '+esc(fmtDateShort(j.date))+'</div></div>'+
+    '<div class="money" style="margin-right:10px">'+esc(money2(row.amount))+'</div>'+
+    '<span class="badge b-'+(row.done?"done":"scheduled")+'">'+(row.done?"✓ done":"booked")+'</span>'+
+  '</div>';
+}
 function repMoneyPanel(me){
   const key=payPeriodKey("month");
   const r=leaderboardRows("sales",key).find(x=>x.user.id===me.id)||{sales:0,comm:0,count:0};
   const paid=payoutsSum(me.id,key),owed=Math.max(0,r.comm-paid);
   const chip=(l,n)=>'<div class="schip"><div class="l">'+esc(l)+'</div><div class="n">'+esc(n)+'</div></div>';
+  const cd=repCommRows(me.id,key);
+  const commChip='<div class="schip" id="rep-comm-chip" style="cursor:pointer">'+
+      '<div class="l">Commission '+(repCommOpen?"▾":"▸")+'</div><div class="n">'+esc(money2(r.comm))+'</div></div>';
+  const drill=repCommOpen?'<div style="margin-top:10px">'+
+      (cd.rows.length?cd.rows.map(repCommRow).join(""):'<div class="sub" style="font-style:italic">No commission jobs this month.</div>')+
+      (cd.bookedTotal>0?'<div class="sub" style="padding:2px 0 0 4px;font-style:italic">Coming up (booked, not yet earned): '+esc(money2(cd.bookedTotal))+'</div>':'')+
+    '</div>':'';
   return '<div class="panel"><h2>My money<span class="pill">'+
       esc(new Date().toLocaleDateString(undefined,{month:"long"}))+'</span></h2><div class="panel-pad">'+
     '<div class="chip-row" style="margin-top:0">'+chip("My sales",money2(r.sales))+
-      chip("Commission",money2(r.comm))+chip("Paid out",money2(paid))+chip("Owed",money2(owed))+'</div>'+
+      commChip+chip("Paid out",money2(paid))+chip("Owed",money2(owed))+'</div>'+
     '<div class="hint">'+r.count+' job'+(r.count!==1?"s":"")+' credited to you this month.</div>'+
+    drill+
   '</div></div>';
 }
 /* His board for today: on the crew, or he closed it. */
@@ -1196,6 +1234,7 @@ function renderRepHome(){
     repLeaderPanel(me)+repMoneyPanel(me)+repDayPanel(me)+repLeadsPanel(me);
   const m=$("#rep-metric");if(m)m.onchange=()=>{repMetric=m.value;renderRepHome();};
   const p=$("#rep-period");if(p)p.onchange=()=>{repPeriod=p.value;renderRepHome();};
+  const cc=$("#rep-comm-chip");if(cc)cc.onclick=()=>{repCommOpen=!repCommOpen;renderRepHome();};
   document.querySelectorAll("[data-repdone]").forEach(b=>b.onclick=()=>{
     completeJobFlow(+b.dataset.repdone);renderRepHome();});
   document.querySelectorAll("[data-jobcard]").forEach(el=>el.onclick=()=>openJob(+el.dataset.jobcard));
