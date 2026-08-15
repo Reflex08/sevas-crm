@@ -1497,7 +1497,6 @@ function jobForm(j,preset){
       .map(c=>'<option value="'+c.id+'"'+(selCid===c.id?" selected":"")+'>'+esc(c.name)+'</option>').join("")+
     '<option value="__new">＋ New client</option>';
   const time=j?(j.time||""):(preset.time||"");
-  const crewIds=j?(j.crewIds||[]):[];
   const closerId=j?j.closerId:null;
   const closerOpts='<option value="">— none —</option>'+
     userOptList(closerId).map(u=>'<option value="'+u.id+'" data-pct="'+(+u.commissionPct||0)+'"'+
@@ -1522,10 +1521,6 @@ function jobForm(j,preset){
       '<div class="field"><label>Time</label><input id="jf-time" type="time" value="'+esc(time)+'"></div>'+
       '<div class="field"><label>Duration (min)</label><input id="jf-dur" type="number" min="15" step="15" value="'+(j?(j.durMin||60):60)+'"></div>'+
     '</div>'+
-    '<div class="field"><label>Crew</label><div class="crew-row" id="jf-crew">'+
-      (()=>{const list=activeUsers();crewIds.forEach(id=>{if(!list.some(u=>u.id===id)){const cu=userById(id);if(cu)list.push(cu);}});return list;})()
-        .map(u=>'<label class="crew-chk"><input type="checkbox" value="'+u.id+'"'+(crewIds.includes(u.id)?" checked":"")+'> '+esc(u.name)+'</label>').join("")+
-    '</div></div>'+
     closerBlock+
     '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
 }
@@ -1579,9 +1574,9 @@ function saveJobBtn(){
     date:$("#jf-date").value||today(),
     time:$("#jf-time").value||"",
     durMin:+$("#jf-dur").value||60,
-    crewIds:[...document.querySelectorAll("#jf-crew input:checked")].map(x=>+x.value),
     notes:($("#jf-notes").value||"").trim(),
   };
+  if(!editJob)data.crewIds=[]; // crew field removed from the form; edits leave existing crewIds alone
   // A split job has no closer/commission select on the form (jobForm) — skip those fields
   // entirely so the merge in updateJob leaves j.splits (and its closerId/commissionPct) untouched.
   const curJob=editJob?db.jobs.find(x=>x.id===editJob):null;
