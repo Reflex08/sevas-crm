@@ -1953,6 +1953,9 @@ function openCustProfile(id){
   const msgs=db.messages.filter(m=>m.customerId===c.id).slice().sort((a,b)=>(b.t||0)-(a.t||0));
   const log=(c.log||[]).slice().sort((a,b)=>(b.t||0)-(a.t||0));
   const addr=[c.street,c.city].filter(Boolean).join(", ");
+  // Salesman view is the basics only: contact + edit + jobs + notes. No message queue, no
+  // activity feed, no deleting accounts, no reassigning whose account it is.
+  const rep=isRep();
   const repOpts=userOptList(c.ownerId).map(u=>'<option value="'+u.id+'"'+(c.ownerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("");
   const sec=(t,n)=>'<div class="sec">'+esc(t)+(n!=null?' <span class="tag">'+n+'</span>':'')+'</div>';
   $("#cust-title").innerHTML='<span style="display:inline-flex;align-items:center;gap:9px">'+
@@ -1967,7 +1970,8 @@ function openCustProfile(id){
       '<div class="k">Email</div><div class="v">'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'—')+'</div>'+
       '<div class="k">Address</div><div class="v">'+esc(addr||"—")+'</div>'+
       '<div class="k">Source</div><div class="v">'+esc(c.source||"—")+'</div>'+
-      '<div class="k">Rep</div><div class="v"><select id="cp-rep" style="'+PILLSEL+'" aria-label="Sales rep">'+repOpts+'</select></div>'+
+      '<div class="k">Rep</div><div class="v">'+(rep?esc((userById(c.ownerId)||{}).name||"—")
+        :'<select id="cp-rep" style="'+PILLSEL+'" aria-label="Sales rep">'+repOpts+'</select>')+'</div>'+
       (c.followup?'<div class="k">Follow-up</div><div class="v">'+esc(fmtDate(c.followup))+'</div>':'')+
     '</div>'+
     sec("Plan")+
@@ -1984,30 +1988,32 @@ function openCustProfile(id){
         '<div class="sub"><span class="badge b-'+esc(j.status)+'">'+esc(j.status)+'</span></div></div>'+
       '<div class="money">'+esc(money(j.price))+'</div></div>').join("")
       :'<div class="note">No jobs yet.</div>')+
-    sec("Messages",msgs.length)+
-    (msgs.length?msgs.map(m=>'<div class="note" style="margin-bottom:8px">'+
-      '<div class="sub">'+esc(m.kind)+' · '+esc(m.status)+(m.dueAt?' · due '+esc(fmtDateShort(m.dueAt)):'')+'</div>'+
-      esc(m.body)+'</div>').join("")
-      :'<div class="note">Nothing queued.</div>')+
+    (rep?"":sec("Messages",msgs.length)+
+      (msgs.length?msgs.map(m=>'<div class="note" style="margin-bottom:8px">'+
+        '<div class="sub">'+esc(m.kind)+' · '+esc(m.status)+(m.dueAt?' · due '+esc(fmtDateShort(m.dueAt)):'')+'</div>'+
+        esc(m.body)+'</div>').join("")
+        :'<div class="note">Nothing queued.</div>'))+
     sec("Notes")+
     '<div class="field"><textarea id="cp-notes" placeholder="Anything worth remembering…">'+esc(c.notes||"")+'</textarea>'+
       '<div class="hint">Saved when you click away.</div></div>'+
-    sec("Activity",log.length)+
-    '<div class="toolbar"><input id="cp-logadd" placeholder="Log a call, a knock, a promise…" style="flex:1" aria-label="New log entry">'+
-      '<button class="btn sm" id="cp-logbtn">Add</button></div>'+
-    (log.length?'<ul class="log">'+log.map(l=>'<li><div class="when">'+esc(fmtWhen(l.t))+'</div>'+
-      '<div class="txt">'+esc(l.m)+'</div></li>').join("")+'</ul>'
-      :'<div class="note">Nothing logged yet.</div>');
+    (rep?"":sec("Activity",log.length)+
+      '<div class="toolbar"><input id="cp-logadd" placeholder="Log a call, a knock, a promise…" style="flex:1" aria-label="New log entry">'+
+        '<button class="btn sm" id="cp-logbtn">Add</button></div>'+
+      (log.length?'<ul class="log">'+log.map(l=>'<li><div class="when">'+esc(fmtWhen(l.t))+'</div>'+
+        '<div class="txt">'+esc(l.m)+'</div></li>').join("")+'</ul>'
+        :'<div class="note">Nothing logged yet.</div>'));
   $("#cust-foot").innerHTML=
-    '<button class="btn del" id="cp-del">Delete</button><span class="spacer"></span>'+
+    (rep?"":'<button class="btn del" id="cp-del">Delete</button>')+'<span class="spacer"></span>'+
     (c.phone?'<a class="btn" style="text-decoration:none" href="sms:'+esc(cleanNum(c.phone))+'">💬 Text</a>':'')+
     (c.stage!=="lost"?'<button class="btn" id="cp-lost">Mark lost</button>':'')+
     '<button class="btn" id="cp-job">＋ Job</button>'+
     '<button class="btn btn-primary" id="cp-close">Close</button>';
   $("#cp-edit").onclick=()=>openCustEdit(c.id);
-  $("#cp-rep").onchange=e=>{updateCust(c.id,{ownerId:+e.target.value||c.ownerId});render();toast("Rep updated","ok");};
+  const repSelEl=$("#cp-rep");
+  if(repSelEl)repSelEl.onchange=e=>{updateCust(c.id,{ownerId:+e.target.value||c.ownerId});render();toast("Rep updated","ok");};
   $("#cp-notes").onchange=e=>{updateCust(c.id,{notes:e.target.value});toast("Notes saved","ok");};
-  $("#cp-logbtn").onclick=()=>{
+  const logBtn=$("#cp-logbtn");
+  if(logBtn)logBtn.onclick=()=>{
     const v=($("#cp-logadd").value||"").trim();if(!v)return;
     c.log=c.log||[];c.log.push({t:Date.now(),m:v});save();openCustProfile(c.id);toast("Logged","ok");};
   document.querySelectorAll("[data-cpjob]").forEach(el=>el.onclick=()=>openJob(+el.dataset.cpjob));
@@ -2017,7 +2023,8 @@ function openCustProfile(id){
   const lost=$("#cp-lost");if(lost)lost.onclick=()=>{
     setStage(c.id,"lost");closeModal("cust-overlay");render();toast(c.name+" → Lost","ok");};
   $("#cp-close").onclick=()=>closeModal("cust-overlay");
-  $("#cp-del").onclick=()=>{
+  const delBtn=$("#cp-del");
+  if(delBtn)delBtn.onclick=()=>{
     if(custJobs(c.id).length){toast(c.name+" has jobs — mark lost instead","err");return;}
     if(!confirm("Delete "+c.name+"? This cannot be undone."))return;
     deleteCust(c.id);closeModal("cust-overlay");render();toast("Deleted","ok");};
