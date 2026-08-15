@@ -3244,7 +3244,43 @@ function renderReportsJobs(){
       statTile("purple","📊","Average job value",money2(stats.avgJobValue),"")+
     '</div>'+
     donutPanel("Jobs by lead source",buildDonut(toPairs(bySource)))+
-    donutPanel("Jobs by service",buildDonut(toPairs(byService)));
+    donutPanel("Jobs by service",buildDonut(toPairs(byService)))+
+    jobsTablePanel(jobs);
+}
+/* The sortable jobs table under the donuts (real-Flyra style). Tap a header to sort; tap the
+   same header again to flip. Rows open the job modal. */
+let repJobsSort={key:"date",dir:-1};
+function sortRangeJobs(jobs){
+  const k=repJobsSort.key,d=repJobsSort.dir;
+  const val=j=>{
+    if(k==="customer"){const c=custById(j.customerId);return (c&&c.name||"").toLowerCase();}
+    if(k==="closer"){const u=userById(jobCloserId(j));return (u&&u.name||"").toLowerCase();}
+    if(k==="status")return j.status;
+    if(k==="source"){const c=custById(j.customerId);return (c&&c.source||"Direct").toLowerCase();}
+    if(k==="total")return +j.price||0;
+    return j.date+" "+(j.time||"");
+  };
+  return jobs.slice().sort((a,b)=>{const x=val(a),y=val(b);return (x<y?-1:x>y?1:0)*d;});
+}
+function jobsTablePanel(jobs){
+  const cols=[["date","Job date"],["customer","Customer"],["closer","Closed by"],["status","Status"],["source","Lead source"],["total","Total"]];
+  const head=cols.map(([k,l])=>'<th class="clickable" data-repsort="'+k+'">'+esc(l)+
+    (repJobsSort.key===k?(repJobsSort.dir>0?" ↑":" ↓"):"")+'</th>').join("");
+  const rows=sortRangeJobs(jobs).map(j=>{
+    const c=custById(j.customerId),u=userById(jobCloserId(j));
+    return '<tr class="clickable" data-repjob="'+j.id+'">'+
+      '<td>'+esc(fmtDateShort(j.date))+'</td>'+
+      '<td class="nm">'+esc(c?c.name:"—")+'</td>'+
+      '<td>'+esc(u?u.name:"—")+'</td>'+
+      '<td><span class="badge b-'+esc(j.status)+'">'+esc(j.status)+'</span></td>'+
+      '<td>'+esc((c&&c.source)||"Direct")+'</td>'+
+      '<td class="money">'+esc(money(j.price))+'</td>'+
+    '</tr>';
+  }).join("");
+  return '<div class="panel"><h2>Jobs <span class="tag">'+jobs.length+'</span></h2><div class="panel-pad" style="overflow-x:auto">'+
+    (jobs.length?'<table><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table>'
+      :'<div class="note">No jobs in this range.</div>')+
+  '</div></div>';
 }
 function planTableRow(p){
   const c=custById(p.customerId),jobs=db.jobs.filter(j=>j.planId===p.id);
@@ -3328,6 +3364,12 @@ function renderReports(){
   document.querySelectorAll("[data-reptab]").forEach(b=>b.onclick=()=>{reportTab=b.dataset.reptab;renderReports();});
   document.querySelectorAll("[data-reprange]").forEach(b=>b.onclick=()=>{repRange=b.dataset.reprange;renderReports();});
   document.querySelectorAll("[data-repplantab]").forEach(b=>b.onclick=()=>{repPlanFilter=b.dataset.repplantab;renderReports();});
+  document.querySelectorAll("[data-repsort]").forEach(h=>h.onclick=()=>{
+    const k=h.dataset.repsort;
+    repJobsSort=repJobsSort.key===k?{key:k,dir:-repJobsSort.dir}:{key:k,dir:k==="date"||k==="total"?-1:1};
+    renderReports();
+  });
+  document.querySelectorAll("[data-repjob]").forEach(r=>r.onclick=()=>openJob(+r.dataset.repjob));
   document.querySelectorAll("[data-repexport]").forEach(b=>b.onclick=()=>{
     if(reportTab==="jobs")downloadCSV("flyra-jobs-"+today()+".csv",jobsCSV(rangeJobs()));
     else if(reportTab==="plans")downloadCSV("flyra-plans-"+today()+".csv",
