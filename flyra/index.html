@@ -1353,17 +1353,38 @@ function renderSchedule(){
 /* --- job modal --- */
 function jobForm(j,preset){
   preset=preset||{};
+  const svcOpts=db.settings.services.map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'"'+
+    (j?j.service===s.name?" selected":"":"")+'>'+esc(s.name)+'</option>').join("");
+  const firstSvc=db.settings.services[0];
+  const date=j?j.date:(preset.date||schedDay);
+  const price=j?j.price:(firstSvc?firstSvc.price:0);
+  const svcPriceBlock='<div class="grid2">'+
+      '<div class="field"><label>Service</label><select id="jf-service">'+svcOpts+'</select></div>'+
+      '<div class="field pre"><label>Price</label><span class="sym" style="top:33px">$</span>'+
+        '<input id="jf-price" type="number" min="0" step="1" value="'+(+price||0)+'"></div>'+
+    '</div>';
+  // Reps get a stripped quick-book form: no customer picker, no crew/closer/commission/time/duration —
+  // saveJobBtn() below creates the customer + job in one shot, or (when editing) only touches
+  // service/price/date/notes so a rep can never reassign who gets credit for a job.
+  if(isRep()){
+    // A preset customer (lead card / "Book their first job?") books onto that customer — the
+    // name fields only appear for a truly new walk-up client.
+    const cust=j?custById(j.customerId):(preset.customerId?custById(preset.customerId):null);
+    return (cust?'<div class="field"><label>Customer</label><div style="padding:9px 0;font-weight:700">'+esc(cust.name)+'</div></div>'+
+          (j?'':'<input type="hidden" id="jf-cid" value="'+cust.id+'">')
+        :'<div class="field"><label>Name *</label><input id="jf-name" type="text"></div>'+
+         '<div class="field"><label>Phone</label><input id="jf-phone" type="tel"></div>'+
+         '<div class="field"><label>Address</label><input id="jf-street" type="text"></div>')+
+      svcPriceBlock+
+      '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
+      '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
+  }
   const selCid=j?j.customerId:(preset.customerId||null); // "＋ Job" from a lead card preselects them
   const custOpts='<option value="">— choose customer —</option>'+
     db.customers.slice().sort((a,b)=>a.name.localeCompare(b.name))
       .map(c=>'<option value="'+c.id+'"'+(selCid===c.id?" selected":"")+'>'+esc(c.name)+'</option>').join("")+
     '<option value="__new">＋ New client</option>';
-  const svcOpts=db.settings.services.map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'"'+
-    (j?j.service===s.name?" selected":"":"")+'>'+esc(s.name)+'</option>').join("");
-  const firstSvc=db.settings.services[0];
-  const date=j?j.date:(preset.date||schedDay);
   const time=j?(j.time||""):(preset.time||"");
-  const price=j?j.price:(firstSvc?firstSvc.price:0);
   const crewIds=j?(j.crewIds||[]):[];
   const closerId=j?j.closerId:null;
   const closerOpts='<option value="">— none —</option>'+
@@ -1371,11 +1392,7 @@ function jobForm(j,preset){
       (closerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("");
   const commVal=j?(+j.commissionPct||0):0;
   return '<div class="field"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>'+
-    '<div class="grid2">'+
-      '<div class="field"><label>Service</label><select id="jf-service">'+svcOpts+'</select></div>'+
-      '<div class="field pre"><label>Price</label><span class="sym" style="top:33px">$</span>'+
-        '<input id="jf-price" type="number" min="0" step="1" value="'+(+price||0)+'"></div>'+
-    '</div>'+
+    svcPriceBlock+
     '<div class="grid3">'+
       '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
       '<div class="field"><label>Time</label><input id="jf-time" type="time" value="'+esc(time)+'"></div>'+
@@ -1394,13 +1411,44 @@ function jobForm(j,preset){
 }
 function jobFoot(j){
   const showConfirm=j&&j.status==="scheduled";
-  return (j?'<button class="btn del" id="jf-delete">Delete</button>':'')+
+  return (j&&!isRep()?'<button class="btn del" id="jf-delete">Delete</button>':'')+ // reps never delete money records
     (showConfirm?'<button class="btn sm" id="jf-confirm">'+(j.termsAcceptedAt?"✓ Confirmed":"📋 Confirm")+'</button>':'')+
     '<span class="spacer"></span>'+
     (j&&j.status!=="done"?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
     '<button class="btn btn-primary" id="jf-save">Save</button>';
 }
 function saveJobBtn(){
+  if(isRep()){
+    const service=$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:"");
+    const price=+$("#jf-price").value||0;
+    const date=$("#jf-date").value||today();
+    const notes=($("#jf-notes").value||"").trim();
+    if(editJob){
+      // Rep editing: only service/price/date/notes change. Who's assigned, who gets the
+      // credit, and the time slot are never read from this form, so updateJob's merge
+      // leaves all of that exactly as it was — a rep can't reassign a job's credit.
+      updateJob(editJob,{service,price,date,notes});
+      closeModal("job-overlay");render();toast("Job saved","ok");
+      return;
+    }
+    const me=whoUser(); // isRep() is true, so a user is guaranteed to be logged in
+    const presetCid=+(($("#jf-cid")||{}).value||0);
+    let c=presetCid?custById(presetCid):null;
+    if(!c){
+      const name=($("#jf-name").value||"").trim();
+      if(!name){toast("Name is required","err");return;}
+      // Same shape as the "__new" quick-add customer below, with name/phone/street/ownerId from the form.
+      c=Object.assign({id:db.seqC++,name:"",phone:"",email:"",street:"",city:"Toronto",lat:null,lng:null,
+        stage:"won",source:"Manual",tags:[],notes:"",log:[],createdAt:Date.now(),ownerId:1,followup:""},
+        {name,phone:($("#jf-phone").value||"").trim(),street:($("#jf-street").value||"").trim(),
+         ownerId:me.id,log:[{t:Date.now(),m:"Booked by "+me.name}]});
+      db.customers.push(c);save();
+    }else if(!c.ownerId){c.ownerId=me.id;}
+    createJob({customerId:c.id,service,price,date,time:"",durMin:60,crewIds:[],
+      closerId:me.id,commissionPct:+me.commissionPct||0,notes});
+    closeModal("job-overlay");render();toast("Job saved","ok");
+    return;
+  }
   const cid=+$("#jf-cust").value||null;
   if(!cid){toast("Pick a customer for this job","err");return;}
   const closerVal=$("#jf-closer").value;
@@ -1428,7 +1476,7 @@ function openJob(id,preset){
   $("#job-body").innerHTML=jobForm(j,preset);
   $("#job-foot").innerHTML=jobFoot(j);
   const cust=$("#jf-cust");
-  cust.onchange=()=>{
+  if(cust)cust.onchange=()=>{
     if(cust.value!=="__new")return;
     const name=(prompt("New client name:")||"").trim();
     if(!name){cust.value=j&&j.customerId?String(j.customerId):"";return;}
@@ -1442,7 +1490,7 @@ function openJob(id,preset){
   const svc=$("#jf-service");
   svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
   const closer=$("#jf-closer");
-  closer.onchange=()=>{
+  if(closer)closer.onchange=()=>{
     const o=closer.selectedOptions[0],wrap=$("#jf-commwrap");
     if(closer.value){wrap.style.display="";if(o&&o.dataset.pct!=null)$("#jf-comm").value=o.dataset.pct;}
     else wrap.style.display="none";
