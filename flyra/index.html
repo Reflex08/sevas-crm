@@ -854,23 +854,37 @@ function jobCloserId(j){ // who gets credit for this job at all: its own closer,
   if(j.closerId)return j.closerId;
   const c=custById(j.customerId);return c?c.ownerId:null;
 }
+/* Split commission (Change A): a job with a non-empty j.splits array is credited ONLY through that
+   array — closerId/commissionPct are ignored on that job. Otherwise the single-closer rule applies
+   (explicit closerId+commissionPct stamp only — no ownerId fallback, that inflated imported books). */
+function jobCredits(j){
+  const price=+j.price||0;
+  if(Array.isArray(j.splits)&&j.splits.length)
+    return j.splits.map(s=>({userId:s.userId,pct:+s.pct||0,
+      amount:price*(+s.pct||0)/100,salesShare:price/j.splits.length}));
+  // A stamped closer at 0% (the owner's own closes) still gets the SALE credit — only the
+  // commission amount is zero. Requiring pct>0 here would wipe the owner off the leaderboard.
+  if(j.closerId)
+    return [{userId:j.closerId,pct:+j.commissionPct||0,amount:price*(+j.commissionPct||0)/100,salesShare:price}];
+  return [];
+}
+function jobCreditedTo(j,userId){return jobCredits(j).some(c=>c.userId===userId);}
 function jobCommission(j){ // {userId,amount} the job actually owes, or null if nobody earns anything.
   // Only what's stamped on the job counts — createJob materializes the rep's rate at creation,
   // so a read-time fallback would double-guess history (it inflated imported books 8x).
-  if((+j.commissionPct||0)>0&&j.closerId)
-    return {userId:j.closerId,amount:(+j.price||0)*(+j.commissionPct||0)/100};
-  return null;
+  const c=jobCredits(j)[0];
+  return c?{userId:c.userId,amount:c.amount}:null;
 }
-/* Top Salespeople — done jobs in a period, credited per job (closer wins, else the owning rep).
-   `key` is a payPeriodKey() string ("YYYY-MM" or "YYYY"); omitted = this month, the dashboard's view. */
+/* Top Salespeople — done jobs in a period, credited per job via jobCredits (splits, or the single
+   stamped closer). `key` is a payPeriodKey() string ("YYYY-MM" or "YYYY"); omitted = this month. */
 function leaderboardRows(metric,key){
   const ym=key||today().slice(0,7);
   const byUser={};
   db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,ym)).forEach(j=>{
-    const uid=jobCloserId(j);if(uid==null)return;
-    const o=byUser[uid]=byUser[uid]||{sales:0,count:0,comm:0};
-    o.sales+=(+j.price||0);o.count+=1;
-    const jc=jobCommission(j);if(jc)o.comm+=jc.amount;
+    jobCredits(j).forEach(cr=>{
+      const o=byUser[cr.userId]=byUser[cr.userId]||{sales:0,count:0,comm:0};
+      o.sales+=cr.salesShare;o.comm+=cr.amount;o.count+=1;
+    });
   });
   return Object.entries(byUser).map(([uid,v])=>{
     const u=userById(+uid);if(!u)return null;
@@ -879,16 +893,16 @@ function leaderboardRows(metric,key){
 }
 /* Rep "My money" drill-down: the exact jobs behind the commission headline, no recomputation.
    leaderboardRows only ever counts DONE jobs into comm, so doneTotal here is computed the same
-   way (status==="done", jobCommission credited to userId) and always equals that headline number.
+   way (status==="done", jobCredits credited to userId) and always equals that headline number.
    Booked (not-yet-done) jobs the rep is credited for come back too, but as a separate bookedTotal
    — they were never in the headline, so they never get folded into it. */
 function repCommRows(userId,key){
   const rows=[];
   db.jobs.forEach(j=>{
     if(j.status==="cancelled"||!jobInPeriod(j.date,key))return;
-    const jc=jobCommission(j);
-    if(!jc||jc.userId!==userId)return;
-    rows.push({job:j,amount:jc.amount,done:j.status==="done"});
+    jobCredits(j).filter(cr=>cr.userId===userId).forEach(cr=>{
+      rows.push({job:j,amount:cr.amount,done:j.status==="done"});
+    });
   });
   rows.sort((a,b)=>(a.job.date||"").localeCompare(b.job.date||""));
   return {rows,
@@ -1184,7 +1198,7 @@ function repMoneyPanel(me){
 function repDayJobs(me){
   const t=today();
   return db.jobs.filter(j=>j.date===t&&j.status!=="cancelled"&&
-      (j.crewIds.includes(me.id)||jobCloserId(j)===me.id))
+      (j.crewIds.includes(me.id)||jobCloserId(j)===me.id||jobCreditedTo(j,me.id)))
     .sort((a,b)=>(a.time||"").localeCompare(b.time||""));
 }
 function repDayPanel(me){
@@ -1430,6 +1444,18 @@ function jobForm(j,preset){
     userOptList(closerId).map(u=>'<option value="'+u.id+'" data-pct="'+(+u.commissionPct||0)+'"'+
       (closerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("");
   const commVal=j?(+j.commissionPct||0):0;
+  // A split job (Change A) has no closer/commission select here — splits are data-level only,
+  // no editing UI yet — just a read-only summary of who's credited, so saveJobBtn never touches it.
+  const splits=j&&Array.isArray(j.splits)?j.splits:[];
+  const closerBlock=splits.length?
+    '<div class="field"><label>Split</label><div style="padding:9px 0;font-weight:700">'+
+      esc("Split: "+splits.map(s=>{const u=userById(s.userId);return (u?u.name:"?")+" "+(+s.pct||0)+"%";}).join(" + "))+
+    '</div></div>'
+    :'<div class="grid2">'+
+      '<div class="field"><label>Closed by</label><select id="jf-closer">'+closerOpts+'</select></div>'+
+      '<div class="field" id="jf-commwrap" style="'+(closerId?"":"display:none")+'"><label>Commission %</label>'+
+        '<input id="jf-comm" type="number" min="0" max="100" step="1" value="'+commVal+'"></div>'+
+    '</div>';
   return '<div class="field"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>'+
     svcPriceBlock+
     '<div class="grid3">'+
@@ -1441,11 +1467,7 @@ function jobForm(j,preset){
       (()=>{const list=activeUsers();crewIds.forEach(id=>{if(!list.some(u=>u.id===id)){const cu=userById(id);if(cu)list.push(cu);}});return list;})()
         .map(u=>'<label class="crew-chk"><input type="checkbox" value="'+u.id+'"'+(crewIds.includes(u.id)?" checked":"")+'> '+esc(u.name)+'</label>').join("")+
     '</div></div>'+
-    '<div class="grid2">'+
-      '<div class="field"><label>Closed by</label><select id="jf-closer">'+closerOpts+'</select></div>'+
-      '<div class="field" id="jf-commwrap" style="'+(closerId?"":"display:none")+'"><label>Commission %</label>'+
-        '<input id="jf-comm" type="number" min="0" max="100" step="1" value="'+commVal+'"></div>'+
-    '</div>'+
+    closerBlock+
     '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
 }
 function jobFoot(j){
@@ -1490,7 +1512,6 @@ function saveJobBtn(){
   }
   const cid=+$("#jf-cust").value||null;
   if(!cid){toast("Pick a customer for this job","err");return;}
-  const closerVal=$("#jf-closer").value;
   const data={
     customerId:cid,
     service:$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:""),
@@ -1499,10 +1520,17 @@ function saveJobBtn(){
     time:$("#jf-time").value||"",
     durMin:+$("#jf-dur").value||60,
     crewIds:[...document.querySelectorAll("#jf-crew input:checked")].map(x=>+x.value),
-    closerId:closerVal?+closerVal:null,
-    commissionPct:closerVal?Math.max(0,Math.min(100,+$("#jf-comm").value||0)):0,
     notes:($("#jf-notes").value||"").trim(),
   };
+  // A split job has no closer/commission select on the form (jobForm) — skip those fields
+  // entirely so the merge in updateJob leaves j.splits (and its closerId/commissionPct) untouched.
+  const curJob=editJob?db.jobs.find(x=>x.id===editJob):null;
+  const isSplit=!!(curJob&&Array.isArray(curJob.splits)&&curJob.splits.length);
+  if(!isSplit){
+    const closerVal=$("#jf-closer").value;
+    data.closerId=closerVal?+closerVal:null;
+    data.commissionPct=closerVal?Math.max(0,Math.min(100,+$("#jf-comm").value||0)):0;
+  }
   if(editJob)updateJob(editJob,data);else createJob(data);
   closeModal("job-overlay");render();toast("Job saved","ok");
 }
@@ -2473,22 +2501,16 @@ function payPeriodKey(p){
 function jobInPeriod(dateStr,key){return key.length===4?(dateStr||"").slice(0,4)===key:(dateStr||"").slice(0,7)===key;}
 function payoutsSum(userId,key){return db.payouts.filter(p=>p.userId===userId&&p.period===key).reduce((s,p)=>s+(+p.amount||0),0);}
 function lastPayoutT(userId,key){const l=db.payouts.filter(p=>p.userId===userId&&p.period===key);return l.length?Math.max(...l.map(p=>p.t)):0;}
-/* Per active user with any activity this period: jobs done (crew, the customer they own, OR the
-   job's own closer — so an imported per-job closer shows up even off a customer they don't own),
-   sales $ on those jobs, commission owed via the same job-level preference rule as the dashboard. */
+/* Per active user: done jobs they're actually CREDITED on (jobCreditedTo — splits, or the single
+   stamped closer). Merely riding crewIds, or owning the customer, is no longer enough — that was
+   the old bug: an owner saw "3 jobs · $448 sales" for a rep who'd closed only one of them. */
 function payrollRows(key){
   const rows=[];
   activeUsers().forEach(u=>{
-    const seen=new Set(),jobs=[];
-    db.jobs.forEach(j=>{
-      if(j.status!=="done"||!jobInPeriod(j.date,key)||seen.has(j.id))return;
-      const c=custById(j.customerId);
-      if(j.crewIds.includes(u.id)||(c&&c.ownerId===u.id)||jobCloserId(j)===u.id){seen.add(j.id);jobs.push(j);}
-    });
+    const jobs=db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,key)&&jobCreditedTo(j,u.id));
     if(!jobs.length)return;
-    const sales=jobs.reduce((s,j)=>s+(+j.price||0),0);
-    const commission=jobs.reduce((s,j)=>{const jc=jobCommission(j);
-      return s+((jc&&jc.userId===u.id)?jc.amount:0);},0);
+    const sales=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.salesShare:0);},0);
+    const commission=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.amount:0);},0);
     const paid=payoutsSum(u.id,key);
     rows.push({user:u,jobsCount:jobs.length,sales,commission,paid,owed:Math.max(0,commission-paid),jobs});
   });
@@ -2539,16 +2561,15 @@ function teamCard(){
     (teamEditUser==="new"?userEditForm(null):"")+
     '</div></div>';
 }
-/* One line per job credited to this user in the period: what they billed it for, and what
-   it actually earned them (jobCommission), or "crew" when they were only along for the job
-   with no commission attached. */
+/* One line per job credited to this user in the period: what they billed it for, and what it
+   actually earned them. payrollRows only ever hands this a job the user is credited on, so a
+   matching jobCredits entry always exists — no more "crew" fallback for an uncredited rider. */
 function payrollJobLine(j,uid){
-  const c=custById(j.customerId),jc=jobCommission(j);
-  const credit=(jc&&jc.userId===uid)?money2(jc.amount):"crew";
+  const c=custById(j.customerId),cr=jobCredits(j).find(x=>x.userId===uid);
   return '<div class="jobline" style="cursor:default;padding-left:52px">'+
     '<div class="sub" style="flex:1;min-width:0">'+esc(fmtDateShort(j.date))+' · '+esc(c?c.name:"—")+' · '+esc(j.service)+
       ' · '+esc(money(j.price))+'</div>'+
-    '<div class="money">'+esc(credit)+'</div></div>';
+    '<div class="money">'+esc(money2(cr?cr.amount:0))+'</div></div>';
 }
 function payrollRow(r,key){
   const u=r.user,lp=lastPayoutT(u.id,key),open=payOpen===u.id;
