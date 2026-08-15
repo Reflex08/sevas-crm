@@ -3055,7 +3055,234 @@ function leakRow(l){
         '<div class="sub">'+l.count+' item'+(l.count!==1?"s":"")+'</div></div>')+
   '</div>';
 }
-function renderReports(){
+/* ---------------- Reports: Jobs + Plans tabs ----------------
+   Overview is untouched — renderReportsOverview() below is the old renderReports() body, byte-for-
+   byte, just returning its markup instead of calling shell() directly. Jobs/Plans are new: their
+   own date range (repRange, independent of the dashboard hero's dashRevPeriod), a CSV export, and
+   donut charts off the shared REPORT_COLORS palette. */
+let reportTab="overview";   // overview | jobs | plans
+let repRange="month";       // week | month | quarter | year — Reports-tab range only
+let repPlanFilter="active"; // active | all — the Active-plans table (Plans tab) + its CSV scope
+const REPORT_COLORS=["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300","#9085e9","#e66767"];
+const OTHER_COLOR="#6b7280";
+function repRangeSpan(){
+  if(repRange==="week")return[offset(-6),today()];
+  if(repRange==="quarter")return[offset(-90),today()];
+  if(repRange==="year"){const n=new Date(),d=new Date(n.getFullYear(),n.getMonth()-11,1);return[localISO(d),today()];}
+  return[offset(-29),today()]; // month (default)
+}
+function repRangeLabel(){const[a,b]=repRangeSpan();return fmtDateShort(a)+" – "+fmtDateShort(b);}
+function rangeJobs(){const[a,b]=repRangeSpan();return db.jobs.filter(j=>j.status!=="cancelled"&&j.date>=a&&j.date<=b);}
+/* Pure — takes an explicit job array so the gate can seed known jobs and check the tile math
+   without touching db or repRange at all. */
+function jobsRangeStats(jobs){
+  jobs=jobs||rangeJobs();
+  const count=jobs.length;
+  const expected=jobs.reduce((s,j)=>s+(+j.price||0),0);
+  const collected=jobs.reduce((s,j)=>s+(+j.collected||0),0);
+  const avg=count?expected/count:0;
+  return {count,expected,collected,perTicket:avg,avgJobValue:avg,collectedPct:expected>0?collected/expected*100:0};
+}
+/* Pure donut builder shared by every Reports donut: sort desc, REPORT_COLORS in fixed order, fold
+   anything past 7 into a gray "Other" slice. Percentages are of the FULL total (folded tail included). */
+function buildDonut(pairs){
+  const sorted=(pairs||[]).filter(p=>p.value>0).slice().sort((a,b)=>b.value-a.value);
+  const total=sorted.reduce((s,p)=>s+p.value,0);
+  const folded=sorted.length>7;
+  const shown=folded?sorted.slice(0,7):sorted;
+  const slices=shown.map((p,i)=>({label:p.label,value:p.value,color:REPORT_COLORS[i],
+    pct:total>0?p.value/total*100:0}));
+  if(folded){
+    const otherVal=sorted.slice(7).reduce((s,p)=>s+p.value,0);
+    slices.push({label:"Other",value:otherVal,color:OTHER_COLOR,pct:total>0?otherVal/total*100:0});
+  }
+  return {slices,total};
+}
+/* Ring built from stacked dasharray circles — a 2px gap between every slice via the "gap" side of
+   each segment's dasharray. Text stays --ink/--muted, never a series color. */
+function donutSVG(built,size,centerN){
+  size=size||168;const cx=size/2,cy=size/2,r=size/2-18,sw=22,C=2*Math.PI*r;
+  let off=0,arcs="";
+  built.slices.forEach(s=>{
+    const frac=built.total>0?s.value/built.total:0,len=Math.max(0,frac*C-2);
+    arcs+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+s.color+'" stroke-width="'+sw+
+      '" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+
+      '" transform="rotate(-90 '+cx+' '+cy+')"/>';
+    off+=frac*C;
+  });
+  const n=centerN!=null?centerN:Math.round(built.total);
+  const center='<text x="'+cx+'" y="'+(cy-3)+'" text-anchor="middle" font-size="9.5" font-weight="800" letter-spacing="1" fill="#9aa1ab">TOTAL</text>'+
+    '<text x="'+cx+'" y="'+(cy+17)+'" text-anchor="middle" font-size="19" font-weight="800" fill="#f5f6f8">'+n+'</text>';
+  return '<svg viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'" style="flex-shrink:0">'+arcs+center+'</svg>';
+}
+function donutLegend(built){
+  if(!built.slices.length)return '<div class="es" style="font-style:italic;color:var(--faint)">Nothing in range.</div>';
+  return built.slices.map(s=>
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0">'+
+      '<span style="width:10px;height:10px;border-radius:50%;background:'+s.color+';flex-shrink:0"></span>'+
+      '<span style="flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.label)+'</span>'+
+      '<span style="color:var(--muted)">'+s.value+'</span>'+
+      '<span style="color:var(--faint);min-width:40px;text-align:right">'+Math.round(s.pct)+'%</span>'+
+    '</div>').join("");
+}
+function donutPanel(title,built,centerN){
+  return '<div class="panel"><h2>'+esc(title)+'</h2><div class="panel-pad" style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'+
+    donutSVG(built,168,centerN)+
+    '<div style="flex:1;min-width:180px">'+donutLegend(built)+'</div>'+
+  '</div></div>';
+}
+function statTile(color,icon,label,num,meta){
+  return '<div class="stat"><div class="ic '+color+'">'+icon+'</div>'+
+    '<div class="label">'+esc(label)+'</div><div class="num">'+esc(num)+'</div>'+
+    (meta?'<div class="meta">'+esc(meta)+'</div>':'')+'</div>';
+}
+/* Cumulative-by-month collected revenue from plan-linked jobs only (j.planId != null) — same
+   trailing-12 shape as revenueByMonth/arrSeries, scoped to recurring work. */
+function planRevenueByMonth(n){
+  const out=[];const base=new Date();base.setDate(1);
+  for(let i=n-1;i>=0;i--){const dt=new Date(base.getFullYear(),base.getMonth()-i,1);
+    const ym=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");
+    const total=db.jobs.filter(j=>j.status!=="cancelled"&&j.planId!=null&&(j.date||"").slice(0,7)===ym)
+      .reduce((s,j)=>s+(+j.collected||0),0);
+    out.push({label:dt.toLocaleDateString(undefined,{month:"short"}),year:dt.getFullYear(),total});}
+  return out;
+}
+function recurringRevenueSeries(){let run=0;return planRevenueByMonth(12).map(m=>({label:m.label,year:m.year,value:(run+=m.total)}));}
+/* The dashboard hero's smooth-line + gradient-area style (heroChartSVG's line branch), lifted out
+   so Reports isn't coupled to the dashboard's chartMode line/bar toggle — this chart is always a line. */
+function reportAreaSVG(data,height){
+  height=height||200;const g=chartGeo(data,height);const base=g.padT+g.ch;
+  const X=i=>g.n<=1?g.padL+g.cw/2:g.padL+g.cw*i/(g.n-1),Y=v=>g.padT+g.ch-g.ch*(v/g.niceMax);
+  const pts=data.map((d,i)=>[X(i),Y(d.value)]);
+  const path=smoothPath(pts,g.padT,base);
+  const area='<path d="'+path+' L '+pts[pts.length-1][0].toFixed(1)+' '+base.toFixed(1)+' L '+pts[0][0].toFixed(1)+' '+base.toFixed(1)+' Z" fill="url(#repgrad)" stroke="none"/>';
+  const line='<path d="'+path+'" fill="none" stroke="#56b8f5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  const last=pts[pts.length-1];
+  const dot='<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="6" fill="#56b8f5" stroke="#121319" stroke-width="2"/>';
+  const baseline='<line x1="'+g.padL+'" y1="'+base.toFixed(1)+'" x2="'+(g.W-g.padR).toFixed(1)+'" y2="'+base.toFixed(1)+'" stroke="rgba(255,255,255,.15)" stroke-width="1.25"/>';
+  let labels="",cols="";
+  data.forEach((d,i)=>{const[x]=pts[i];
+    if(g.showLbl(i))labels+='<text x="'+x.toFixed(1)+'" y="'+(g.H-8)+'" text-anchor="middle" font-size="10.5" fill="#9aa1ab" font-weight="600">'+esc(d.label)+'</text>';
+    const colw=g.cw/Math.max(1,g.n);
+    cols+='<g class="acol" data-lbl="'+esc(d.label+(d.year?(" "+d.year):""))+'" data-val="'+esc(money(d.value))+'">'+
+      '<rect x="'+(x-colw/2).toFixed(1)+'" y="'+g.padT.toFixed(1)+'" width="'+colw.toFixed(1)+'" height="'+(g.ch+6).toFixed(1)+'" fill="transparent"/></g>';});
+  const defs='<defs><linearGradient id="repgrad" x1="0" y1="0" x2="0" y2="1">'+
+    '<stop offset="0" stop-color="rgba(86,184,245,.18)"/><stop offset="1" stop-color="rgba(86,184,245,0)"/></linearGradient></defs>';
+  return svgWrap(g,baseline+area+line+dot+labels+cols,defs);
+}
+/* Pure — takes an explicit plan array so the gate can seed a plan and check the tile math without
+   touching db.plans. */
+function plansStats(plans){
+  plans=plans||db.plans;
+  const total=plans.length,act=plans.filter(p=>p.status==="active");
+  const activeValue=act.reduce((s,p)=>s+(+p.perVisit||0)*(+p.visitsPerYear||0),0);
+  return {avgPlanValue:act.length?activeValue/act.length:0,activeCount:act.length,totalCount:total,
+    signedRate:total?plans.filter(p=>!!p.signedAt).length/total*100:0,planRevenueYr:activeValue};
+}
+function freqLabel(n){n=+n||0;
+  return n===12?"Monthly":n===4?"Quarterly":n===2?"Semi-annual":n===3?"Tri-annual":n===1?"Annual":n+"/yr";}
+function csvCell(v){v=v==null?"":String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function jobsCSV(jobs){
+  const rows=[["date","time","customer","service","price","collected","status","closedBy"]];
+  jobs.forEach(j=>{const c=custById(j.customerId),closer=userById(jobCloserId(j));
+    rows.push([j.date,j.time,c?c.name:"",j.service,+j.price||0,+j.collected||0,j.status,closer?closer.name:""]);});
+  return rows.map(r=>r.map(csvCell).join(",")).join("\n");
+}
+function plansCSV(plans){
+  const rows=[["plan","customer","status","perVisit","visitsPerYear","valuePerYear","signedAt"]];
+  plans.forEach(p=>{const c=custById(p.customerId);
+    rows.push([p.name,c?c.name:"",p.status,+p.perVisit||0,+p.visitsPerYear||0,
+      (+p.perVisit||0)*(+p.visitsPerYear||0),p.signedAt?fmtDateShort(localISO(new Date(p.signedAt))):""]);});
+  return rows.map(r=>r.map(csvCell).join(",")).join("\n");
+}
+/* Guarded the same way downloadBackup() already is — createElement()/click() are no-ops in the
+   test DOM-stub, so this never throws there. */
+function downloadCSV(filename,text){
+  const url=URL.createObjectURL(new Blob([text],{type:"text/csv"}));
+  const a=document.createElement("a");a.href=url;a.download=filename;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+function reportTabBar(){
+  return '<div class="seg" style="margin-bottom:16px">'+[["overview","Overview"],["jobs","Jobs"],["plans","Plans"]]
+    .map(([v,l])=>'<button data-reptab="'+v+'" class="'+(reportTab===v?"active":"")+'">'+esc(l)+'</button>').join("")+'</div>';
+}
+function repRangeBar(){
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
+    '<div class="seg">'+[["week","1W"],["month","1M"],["quarter","3M"],["year","1Y"]]
+      .map(([v,l])=>'<button data-reprange="'+v+'" class="'+(repRange===v?"active":"")+'">'+l+'</button>').join("")+'</div>'+
+    '<span style="'+PILL_SEL+'">'+esc(repRangeLabel())+'</span>'+
+    '<button class="btn sm" style="margin-left:auto" data-repexport>⬇ Export CSV</button>'+
+  '</div>';
+}
+function renderReportsJobs(){
+  const jobs=rangeJobs(),stats=jobsRangeStats(jobs);
+  const bySource={},byService={};
+  jobs.forEach(j=>{
+    const c=custById(j.customerId),src=(c&&c.source)||"Direct";
+    bySource[src]=(bySource[src]||0)+1;
+    const sv=svcGroup(j.service);byService[sv]=(byService[sv]||0)+1;
+  });
+  const toPairs=m=>Object.entries(m).map(([label,value])=>({label,value}));
+  return repRangeBar()+
+    '<div class="stats">'+
+      statTile("blue","🧰","Jobs",String(stats.count),stats.count+" job"+(stats.count!==1?"s":"")+" in this date range")+
+      statTile("green","💵","Expected revenue",money(stats.expected),money2(stats.perTicket)+" per ticket")+
+      statTile("cyan","🏦","Collected revenue",money(stats.collected),Math.round(stats.collectedPct)+"% of expected")+
+      statTile("purple","📊","Average job value",money2(stats.avgJobValue),"")+
+    '</div>'+
+    donutPanel("Jobs by lead source",buildDonut(toPairs(bySource)))+
+    donutPanel("Jobs by service",buildDonut(toPairs(byService)));
+}
+function planTableRow(p){
+  const c=custById(p.customerId),jobs=db.jobs.filter(j=>j.planId===p.id);
+  const done=jobs.filter(j=>j.status==="done").length,totalJ=jobs.length;
+  const pct=totalJ?Math.round(done/totalJ*100):0;
+  return '<tr class="clickable" data-repplan="'+p.id+'">'+
+    '<td class="nm">'+esc(p.name||p.service||"Plan")+'</td>'+
+    '<td>'+esc(c?c.name:"—")+'</td>'+
+    '<td><span class="badge b-'+esc(p.status)+'">'+esc(p.status)+'</span></td>'+
+    '<td><div style="display:flex;align-items:center;gap:8px;min-width:110px">'+
+      '<span class="sub">'+done+'/'+totalJ+'</span>'+
+      '<div style="flex:1;height:6px;border-radius:4px;background:var(--gray-soft);overflow:hidden">'+
+        '<div style="width:'+pct+'%;height:100%;background:var(--brand)"></div></div></div></td>'+
+    '<td class="sub">On job completion ('+(+p.visitsPerYear||0)+'×/yr)</td>'+
+    '<td class="r money">'+esc(money2(p.perVisit))+'</td>'+
+    '<td class="r money">'+esc(money2((+p.perVisit||0)*(+p.visitsPerYear||0)))+'</td>'+
+  '</tr>';
+}
+function renderReportsPlans(){
+  const stats=plansStats(db.plans);
+  const freqVal={};
+  db.plans.filter(p=>p.status==="active").forEach(p=>{
+    const k=freqLabel(p.visitsPerYear);freqVal[k]=(freqVal[k]||0)+(+p.perVisit||0)*(+p.visitsPerYear||0);
+  });
+  const byFreq=buildDonut(Object.entries(freqVal).map(([label,value])=>({label,value})));
+  const series=recurringRevenueSeries();
+  const activeN=db.plans.filter(p=>p.status==="active").length,allN=db.plans.length;
+  const list=db.plans.filter(p=>repPlanFilter==="all"||p.status==="active").slice().sort((a,b)=>b.id-a.id);
+  return repRangeBar()+
+    '<div class="stats">'+
+      statTile("blue","📈","Average plan value",money2(stats.avgPlanValue),"")+
+      statTile("green","🔁","Active plans",String(stats.activeCount),stats.totalCount+" total")+
+      statTile("amber","✍️","Signed rate",Math.round(stats.signedRate)+"%","")+
+      statTile("purple","💰","Plan revenue /yr",money(stats.planRevenueYr),"")+
+    '</div>'+
+    donutPanel("By frequency",byFreq,activeN)+
+    '<div class="panel"><h2>Recurring revenue<span class="pill">last 12</span></h2><div class="panel-pad">'+
+      (series.some(m=>m.value>0)?reportAreaSVG(series,200)
+        :'<div class="empty" style="padding:28px"><div class="big">📊</div>No plan-linked revenue yet.</div>')+
+    '</div></div>'+
+    '<div class="panel"><h2>Active plans<span class="spacer"></span>'+
+      '<div class="map-bar" style="margin:0">'+
+        '<button class="mpill'+(repPlanFilter==="active"?" active":"")+'" data-repplantab="active">Active <span class="n">'+activeN+'</span></button>'+
+        '<button class="mpill'+(repPlanFilter==="all"?" active":"")+'" data-repplantab="all">All <span class="n">'+allN+'</span></button>'+
+      '</div></h2>'+
+      (list.length?'<div style="overflow-x:auto"><table><thead><tr><th>Plan</th><th>Customer</th><th>Status</th><th>Jobs</th><th>Billing</th><th class="r">Amount</th><th class="r">Value/yr</th></tr></thead>'+
+        '<tbody>'+list.map(planTableRow).join("")+'</tbody></table></div>'
+        :'<div class="empty">No plans yet.</div>')+
+    '</div>';
+}
+function renderReportsOverview(){
   const yr=curYear();
   const months=revenueByMonth(12).map(m=>({label:m.label,year:m.year,value:m.total}));
   const collected=doneThisYear().reduce((s,j)=>s+(+j.collected||0),0);
@@ -3063,8 +3290,7 @@ function renderReports(){
   const pct=goal>0?Math.min(100,collected/goal*100):0;
   const svc=groupTotals(j=>svcGroup(j.service)); // owner: fold the one-off services into "& Other"
   const reps=groupTotals(j=>{const c=custById(j.customerId);return (c&&c.ownerId)||0;});
-  shell("Reports","Where the money goes",
-    '<div class="panel"><h2>Revenue by month<span class="pill">last 12</span></h2><div class="panel-pad">'+
+  return '<div class="panel"><h2>Revenue by month<span class="pill">last 12</span></h2><div class="panel-pad">'+
       (months.some(m=>m.value>0)?areaChartSVG(months,200)
         :'<div class="empty" style="padding:28px"><div class="big">📊</div>No collected revenue yet.</div>')+
       '<div class="big-num" style="margin-top:10px">'+esc(money(collected))+'</div>'+
@@ -3081,8 +3307,21 @@ function renderReports(){
     breakdownCard("By rep",reps,k=>{const u=userById(k);return u?u.name:"Unassigned";})+
     '<div class="panel"><h2>Leak finder</h2><div class="panel-pad">'+
       leakRows().map(leakRow).join("")+
-    '</div></div>');
-  document.querySelectorAll("[data-leakview]").forEach(el=>el.onclick=()=>setView(el.dataset.leakview));
+    '</div></div>';
+}
+function renderReports(){
+  const inner=reportTab==="jobs"?renderReportsJobs():reportTab==="plans"?renderReportsPlans():renderReportsOverview();
+  shell("Reports","Where the money goes",reportTabBar()+inner);
+  document.querySelectorAll("[data-reptab]").forEach(b=>b.onclick=()=>{reportTab=b.dataset.reptab;renderReports();});
+  document.querySelectorAll("[data-reprange]").forEach(b=>b.onclick=()=>{repRange=b.dataset.reprange;renderReports();});
+  document.querySelectorAll("[data-repplantab]").forEach(b=>b.onclick=()=>{repPlanFilter=b.dataset.repplantab;renderReports();});
+  document.querySelectorAll("[data-repexport]").forEach(b=>b.onclick=()=>{
+    if(reportTab==="jobs")downloadCSV("flyra-jobs-"+today()+".csv",jobsCSV(rangeJobs()));
+    else if(reportTab==="plans")downloadCSV("flyra-plans-"+today()+".csv",
+      plansCSV(db.plans.filter(p=>repPlanFilter==="all"||p.status==="active")));
+  });
+  if(reportTab==="plans")document.querySelectorAll("[data-repplan]").forEach(el=>el.onclick=()=>openPlan(+el.dataset.repplan));
+  if(reportTab==="overview")document.querySelectorAll("[data-leakview]").forEach(el=>el.onclick=()=>setView(el.dataset.leakview));
   bindChartTips();
 }
 
