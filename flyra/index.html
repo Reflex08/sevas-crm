@@ -382,6 +382,7 @@
   .adot{transition:filter .13s,r .13s}
   .acol{cursor:default}
   .acol:hover .adot{filter:brightness(1.2) drop-shadow(0 2px 7px rgba(139,92,246,.6))}
+  .acol:hover .xline{opacity:1}
   .chart-tip{position:fixed;z-index:150;background:#15161c;border:1px solid var(--line);border-radius:10px;
     padding:8px 12px;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .12s,transform .12s;
     box-shadow:var(--shadow-lg);white-space:nowrap;line-height:1.35}
@@ -568,6 +569,54 @@ function areaChartSVG(data,height){
     '<linearGradient id="linegrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6d28d9"/><stop offset=".5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>'+
     '</defs>';
   return svgWrap(g,area+glow+line+baseline+labels+cols,defs);
+}
+/* The dashboard hero chart — brand blue, single series, no legend. Independent of areaChartSVG
+   (which Reports still uses with its own purple styling, untouched): line mode draws the same
+   smooth path + gradient area + a highlighted last-point dot; bar mode draws one rounded-top-only
+   bar per point. Reuses chartGeo's grid/geometry and the .acol hit-column + #chart-tip hover
+   system areaChartSVG already established. */
+function heroChartSVG(data,height){
+  height=height||184;const g=chartGeo(data,height);const base=g.padT+g.ch;
+  const X=i=>g.n<=1?g.padL+g.cw/2:g.padL+g.cw*i/(g.n-1),Y=v=>g.padT+g.ch-g.ch*(v/g.niceMax);
+  const pts=data.map((d,i)=>[X(i),Y(d.value)]);
+  let marks="";
+  if(chartMode==="bar"){
+    const gap=2,slot=g.cw/Math.max(1,g.n),w=Math.max(2,slot-gap);
+    data.forEach((d,i)=>{
+      const x=X(i)-w/2,y=Y(d.value),h=base-y;
+      if(h<=0)return;
+      const r=Math.min(4,w/2,h);
+      marks+='<path d="M'+x.toFixed(1)+' '+base.toFixed(1)+' L'+x.toFixed(1)+' '+(y+r).toFixed(1)+
+        ' A'+r.toFixed(1)+' '+r.toFixed(1)+' 0 0 1 '+(x+r).toFixed(1)+' '+y.toFixed(1)+
+        ' L'+(x+w-r).toFixed(1)+' '+y.toFixed(1)+
+        ' A'+r.toFixed(1)+' '+r.toFixed(1)+' 0 0 1 '+(x+w).toFixed(1)+' '+(y+r).toFixed(1)+
+        ' L'+(x+w).toFixed(1)+' '+base.toFixed(1)+' Z" fill="#56b8f5"/>';
+    });
+  }else{
+    const path=smoothPath(pts,g.padT,base);
+    const area='<path d="'+path+' L '+pts[pts.length-1][0].toFixed(1)+' '+base.toFixed(1)+' L '+pts[0][0].toFixed(1)+' '+base.toFixed(1)+' Z" fill="url(#herograd)" stroke="none"/>';
+    const line='<path d="'+path+'" fill="none" stroke="#56b8f5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    const last=pts[pts.length-1];
+    const dot='<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="8" fill="#56b8f5" stroke="#121319" stroke-width="2"/>';
+    marks=area+line+dot;
+  }
+  const baseline='<line x1="'+g.padL+'" y1="'+base.toFixed(1)+'" x2="'+(g.W-g.padR).toFixed(1)+'" y2="'+base.toFixed(1)+'" stroke="rgba(255,255,255,.15)" stroke-width="1.25"/>';
+  let labels="",cols="";
+  data.forEach((d,i)=>{
+    const[x]=pts[i];
+    if(g.showLbl(i)){
+      const lbl=/^\d+\/\d+$/.test(d.label)?d.label.replace(/^\d+\//,""):d.label; // day-of-month only for daily buckets
+      labels+='<text x="'+x.toFixed(1)+'" y="'+(g.H-8)+'" text-anchor="middle" font-size="10.5" fill="#9aa1ab" font-weight="600">'+esc(lbl)+'</text>';
+    }
+    const colw=g.cw/Math.max(1,g.n);
+    cols+='<g class="acol" data-lbl="'+esc(d.label+(d.year?(" "+d.year):""))+'" data-val="'+esc(money(d.value))+'">'+
+      '<rect x="'+(x-colw/2).toFixed(1)+'" y="'+g.padT.toFixed(1)+'" width="'+colw.toFixed(1)+'" height="'+(g.ch+6).toFixed(1)+'" fill="transparent"/>'+
+      '<line class="xline" x1="'+x.toFixed(1)+'" y1="'+g.padT.toFixed(1)+'" x2="'+x.toFixed(1)+'" y2="'+base.toFixed(1)+'" stroke="rgba(255,255,255,.18)" stroke-width="1" opacity="0"/>'+
+      '</g>';
+  });
+  const defs='<defs><linearGradient id="herograd" x1="0" y1="0" x2="0" y2="1">'+
+    '<stop offset="0" stop-color="rgba(86,184,245,.18)"/><stop offset="1" stop-color="rgba(86,184,245,0)"/></linearGradient></defs>';
+  return svgWrap(g,baseline+marks+labels+cols,defs);
 }
 /* Hover tooltip shared by every chart. Re-bound after each render that draws one. */
 function bindChartTips(){
@@ -850,13 +899,35 @@ function arrSeries(){
   const Y=today().slice(0,4);let run=0;
   return revenueByMonth(12).filter(m=>String(m.year)===Y).map(m=>({label:m.label,year:m.year,value:(run+=m.total)}));
 }
-/* "Daily avg" and "Peak" stat chips under the revenue card — both scoped to the current month. */
-function dashChips(){
-  const t=today(),ym=t.slice(0,7),dayNum=+t.slice(8,10);
-  const inMon=db.jobs.filter(j=>j.status!=="cancelled"&&(j.date||"").slice(0,7)===ym);
-  const monthTotal=inMon.reduce((s,j)=>s+(+j.collected||0),0);
-  const byDay={};inMon.forEach(j=>{if(j.date)byDay[j.date]=(byDay[j.date]||0)+(+j.collected||0);});
-  return {dailyAvg:monthTotal/Math.max(1,dayNum),peak:Math.max(0,...Object.values(byDay))};
+/* ---------------- Hero chart (dashboard) ----------------
+   heroSeries() is the ONE call both the chart and the derived stats read, so "Daily avg"/"Peak"
+   can never drift from what's drawn. heroRange() is the calendar span behind the current pill
+   (week/month/quarter/year, or Jan1-to-today for ARR) — used for the range-label pill and as the
+   "days in range" denominator (quarter/year bucket by week/month, not day, so series.length isn't
+   the day count). */
+function heroRange(){
+  if(dashRevTab==="arr")return[today().slice(0,4)+"-01-01",today()];
+  if(dashRevPeriod==="week")return[offset(-6),today()];
+  if(dashRevPeriod==="quarter")return[offset(-90),today()];
+  if(dashRevPeriod==="year"){const n=new Date(),d=new Date(n.getFullYear(),n.getMonth()-11,1);return[localISO(d),today()];}
+  return[offset(-29),today()]; // month (default)
+}
+function heroRangeLabel(){const[a,b]=heroRange();return fmtDateShort(a)+" – "+fmtDateShort(b);}
+function heroSeries(){return dashRevTab==="arr"?arrSeries():revenueSeries(dashRevPeriod);}
+function heroStats(){
+  const[a,b]=heroRange();
+  const days=Math.round((new Date(b)-new Date(a))/86400000)+1;
+  // ARR's series is CUMULATIVE — summing it would count every dollar once per later month.
+  // There: total = the year's real revenue, peak = the best single month.
+  if(dashRevTab==="arr"){
+    const Y=today().slice(0,4);
+    const months=revenueByMonth(12).filter(m=>String(m.year)===Y);
+    const total=months.reduce((s,m)=>s+m.total,0);
+    return{dailyAvg:total/Math.max(1,days),peak:Math.max(0,...months.map(m=>m.total))};
+  }
+  const series=heroSeries();
+  const total=series.reduce((s,d)=>s+d.value,0);
+  return{dailyAvg:total/Math.max(1,days),peak:Math.max(0,...series.map(d=>d.value))};
 }
 /* Commission fidelity (F12): the OLD import bug attributed commission via customer.ownerId x
    user.commissionPct across EVERY job that customer ever had — wildly inflating payroll versus
@@ -1052,38 +1123,46 @@ function shell(title,sub,inner){
 }
 function greeting(){const h=new Date().getHours();return h<12?"Good morning":h<18?"Good afternoon":"Good evening";}
 
-/* Dashboard-only UI state — resets on reload, never dirties `db`. */
+/* Dashboard-only UI state — resets on reload, never dirties `db`. chartMode is the one exception:
+   it's a display preference, so it rides in uiPref like schedView/payPeriod already do. */
 let dashRevTab="revenue";   // revenue | arr
-let dashRevPeriod="month";  // week | month | quarter | year | all
+let dashRevPeriod="month";  // week | month | quarter | year
+let chartMode=uiPref().chartMode||"line"; // line | bar — dashboard hero chart only
 let lbMetric="sales";       // sales | commission
 const PILL_SEL="border-radius:999px;padding:6px 12px;background:#0d0e12;border:1px solid var(--line);color:var(--ink);font-weight:600;font-size:12.5px";
 
 function revenuePanel(){
   const isArr=dashRevTab==="arr";
-  const series=isArr?arrSeries():revenueSeries(dashRevPeriod);
+  const series=heroSeries();
   const big=isArr?arrTotal():series.reduce((s,d)=>s+d.value,0);
   const hit=series.filter(d=>d.value>0);
-  const avg=hit.length?hit.reduce((s,d)=>s+d.value,0)/hit.length:0;
-  const periods=[["week","Week"],["month","Month"],["quarter","Quarter"],["year","Year"],["all","All time"]];
-  const chips=dashChips();
-  const body=hit.length?areaChartSVG(series,184)
+  const stats=heroStats();
+  const ranges=[["week","1W"],["month","1M"],["quarter","3M"],["year","1Y"]];
+  const body=hit.length?heroChartSVG(series,184)
     :'<div class="empty" style="padding:28px"><div class="big">📊</div>No revenue in this range yet.</div>';
   return '<div class="panel"><div class="panel-pad" style="padding:16px 18px">'+
-    '<div style="display:flex;gap:4px;margin-bottom:10px">'+
-      '<button class="ftab '+(isArr?"":"active")+'" data-rtab="revenue">Revenue</button>'+
-      '<button class="ftab '+(isArr?"active":"")+'" data-rtab="arr">ARR</button>'+
+    '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap">'+
+      '<div style="display:flex;gap:4px">'+
+        '<button class="ftab '+(isArr?"":"active")+'" data-rtab="revenue">Revenue</button>'+
+        '<button class="ftab '+(isArr?"active":"")+'" data-rtab="arr">ARR</button>'+
+      '</div>'+
+      '<div class="seg">'+
+        '<button data-cm="line" class="'+(chartMode==="line"?"active":"")+'" title="Line">📈</button>'+
+        '<button data-cm="bar" class="'+(chartMode==="bar"?"active":"")+'" title="Bar">📊</button>'+
+      '</div>'+
+      (isArr?"":'<div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+
+        '<div class="seg">'+ranges.map(([v,l])=>'<button data-rp="'+v+'" class="'+(dashRevPeriod===v?"active":"")+'">'+l+'</button>').join("")+'</div>'+
+        '<span style="'+PILL_SEL+'">'+esc(heroRangeLabel())+'</span>'+
+      '</div>')+
     '</div>'+
     '<div class="sec" style="margin:0 0 4px;color:#fff;font-size:12px;font-weight:700">'+(isArr?"ARR":"Revenue")+'</div>'+
     '<div class="big-num">'+esc(money(big))+'</div>'+
     body+
-    '<div style="color:var(--muted);font-size:12px;margin-top:6px;font-style:italic">Avg: '+esc(money2(avg))+'</div>'+
-    (isArr?"":'<div class="toolbar" style="margin-top:10px"><div class="seg">'+
-      periods.map(([v,l])=>'<button data-rp="'+v+'" class="'+(dashRevPeriod===v?"active":"")+'">'+esc(l)+'</button>').join("")+
-      '</div></div>')+
     '<div class="chip-row">'+
-      '<div class="schip"><div class="l">Daily avg</div><div class="n">'+esc(money2(chips.dailyAvg))+'</div></div>'+
-      '<div class="schip"><div class="l">Peak</div><div class="n">'+esc(money2(chips.peak))+'</div></div>'+
+      '<div class="schip"><div class="l" style="text-transform:uppercase;font-style:normal">Daily avg</div><div class="n">'+esc(money2(stats.dailyAvg))+'</div></div>'+
+      '<div class="schip"><div class="l" style="text-transform:uppercase;font-style:normal">Peak</div><div class="n">'+esc(money2(stats.peak))+'</div></div>'+
     '</div>'+
+    '<div style="text-align:right;color:var(--muted);font-size:12px;margin-top:8px">Updated '+esc(fmtWhen(Date.now()))+'</div>'+
   '</div></div>';
 }
 function leaderboardPanel(){
@@ -1137,6 +1216,7 @@ function renderDashboard(){
     revenuePanel()+leaderboardPanel()+todayPanel()+activityPanel();
   document.querySelectorAll("[data-rtab]").forEach(b=>b.onclick=()=>{dashRevTab=b.dataset.rtab;renderDashboard();});
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;renderDashboard();});
+  document.querySelectorAll("[data-cm]").forEach(b=>b.onclick=()=>{chartMode=b.dataset.cm;uiSet({chartMode});renderDashboard();});
   const lbm=$("#lb-metric");if(lbm)lbm.onchange=()=>{lbMetric=lbm.value;renderDashboard();};
   document.querySelectorAll("[data-pv]").forEach(el=>el.onclick=()=>setView(el.dataset.pv));
   document.querySelectorAll("[data-goto-today]").forEach(el=>el.onclick=()=>{schedDay=today();schedView="day";setView("schedule");});
