@@ -668,6 +668,7 @@ const MSG_KINDS={
   review:{label:"Review",cls:"b-won"},
   reminder:{label:"Reminder",cls:"b-scheduled"},
   manual:{label:"Manual",cls:"b-new"},
+  referral:{label:"Referral",cls:"b-owner"},
 };
 const TPL_FOR={reminder:"t1",followup:"t2",review:"t3"}; // kind → template id (names stay fixed)
 const MSG_VARS=["{firstname}","{name}","{service}","{date}","{time}","{business}"];
@@ -683,6 +684,8 @@ const DEFAULT_SETTINGS=()=>({
   tier:"business",
   terms:{cancelFeePct:20,text:"Free rescheduling up to 24h before the visit. Cancellations within "+
     "24h incur a {fee}% fee. Work is weather-dependent; we'll confirm the morning of."},
+  referral:{theyGet:25,youGet:50,giftCard:0,sendWhen:"done",
+    template:"Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}"},
 });
 const SIG_STUB="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -790,6 +793,12 @@ function normalize(r){
   s.terms=Object.assign({},d.terms,s.terms||{});
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
+  s.referral=Object.assign({},d.referral,s.referral||{});
+  s.referral.theyGet=isFinite(+s.referral.theyGet)?Math.max(0,+s.referral.theyGet):d.referral.theyGet;
+  s.referral.youGet=isFinite(+s.referral.youGet)?Math.max(0,+s.referral.youGet):d.referral.youGet;
+  s.referral.giftCard=isFinite(+s.referral.giftCard)?Math.max(0,+s.referral.giftCard):d.referral.giftCard;
+  if(!["done","off"].includes(s.referral.sendWhen))s.referral.sendWhen=d.referral.sendWhen;
+  if(typeof s.referral.template!=="string")s.referral.template=d.referral.template;
   for(const k of ["users","customers","jobs","invoices","plans","pins","messages","equipment","expenses","payouts"])
     if(!Array.isArray(r[k]))r[k]=[];
   // per-row guards — a hand-edited or older file must never crash a renderer
@@ -1399,6 +1408,7 @@ function completeJobFlow(id){
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+j.service+" — "+(paid?"collected "+money(price):"unpaid")});}
   save();
   if(j.planId)ensurePlanJobs(); // a plan visit is done — queue its next one
+  queueReferral(j.customerId);
   return j;
 }
 /* Fat-finger insurance: put a done job back on the schedule. Collected money is zeroed (it was
@@ -1876,6 +1886,7 @@ function completeSlot(customerId,date,time){
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+jobs.map(j=>j.service).join(" + ")+" — "+(paid?"collected "+money(total):"unpaid")});}
   save();
   if(jobs.some(j=>j.planId))ensurePlanJobs();
+  queueReferral(customerId); // one draft per completion event, not per service in the slot
   return jobs;
 }
 
@@ -2517,6 +2528,20 @@ function confirmLink(id){
     .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   return "https://reflex08.github.io/sevas-crm/confirm.html?d="+b64;
 }
+/* Hosted referral page: same base64url-JSON pattern as confirmLink, one field shorter. Unlike
+   confirmLink this never refuses a missing business phone — referral.html falls back to a
+   copy-the-text button when ph is blank, so there's nothing here to block on. ref is the
+   customer's FIRST NAME ONLY, never the full name or address — that's what the public link carries. */
+function referralLink(customerId){
+  const c=custById(customerId);if(!c)return null;
+  const biz=db.settings.business||{};
+  const r=db.settings.referral||{};
+  const payload={biz:biz.name||"",ph:cleanNum(biz.phone),ref:firstName(c.name),
+    tg:+r.theyGet||0,yg:+r.youGet||0,gc:+r.giftCard||0};
+  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  return "https://reflex08.github.io/sevas-crm/referral.html?d="+b64;
+}
 function copyBookingLink(id){
   const link=confirmLink(id);if(!link)return;
   const j=db.jobs.find(x=>x.id===id),c=j&&custById(j.customerId);
@@ -2617,6 +2642,23 @@ function queueMsg(customerId,kind,body,why,extra){
   const m=Object.assign({id:db.seqM++,customerId,dir:"out",kind,body,why:why||"",
     t:Date.now(),dueAt:today(),status:"queued"},extra||{});
   db.messages.push(m);return m;
+}
+/* Referral queue hook (no auto-send — this only ever calls queueMsg, same as every other rule).
+   Fired from completeJobFlow/completeSlot on a completed job. One draft per customer, ever: a
+   second completion is a no-op once a non-cancelled referral message already exists for them. */
+function queueReferral(customerId){
+  const r=db.settings.referral||{};
+  if(r.sendWhen!=="done")return null;
+  const c=custById(customerId);
+  if(!c||!cleanNum(c.phone))return null;
+  if(db.messages.some(m=>m.customerId===customerId&&m.kind==="referral"&&m.status!=="cancelled"))return null;
+  const link=referralLink(customerId);if(!link)return null;
+  const biz=db.settings.business||{};
+  const body=String(r.template||"")
+    .replace(/\{customer_name\}/g,firstName(c.name))
+    .replace(/\{company_name\}/g,biz.name||"Seva's Services")
+    .replace(/\{referral_link\}/g,link);
+  const m=queueMsg(customerId,"referral",body);save();return m;
 }
 /* The rules engine. Deterministic and idempotent: every rule refuses to queue when a matching
    draft already exists, so app-open and the button can both call it as often as they like. */
@@ -3197,6 +3239,25 @@ function termsCard(){
     '<div class="hint">Clients confirm on your hosted page — reflex08.github.io/sevas-crm/confirm.html</div>'+
     '</div></div>';
 }
+function referralCard(){
+  const r=db.settings.referral||{};
+  return '<div class="panel"><h2>Referral program</h2><div class="panel-pad">'+
+    '<div class="grid2">'+
+      '<div class="field"><label>They get ($)</label><input id="set-reftg" type="number" min="0" step="1" value="'+(+r.theyGet||0)+'"></div>'+
+      '<div class="field"><label>You get ($)</label><input id="set-refyg" type="number" min="0" step="1" value="'+(+r.youGet||0)+'"></div>'+
+    '</div>'+
+    '<div class="grid2">'+
+      '<div class="field"><label>Gift card ($, 0 = off)</label><input id="set-refgc" type="number" min="0" step="1" value="'+(+r.giftCard||0)+'"></div>'+
+      '<div class="field"><label>Send when</label><select id="set-refwhen">'+
+        '<option value="done"'+(r.sendWhen==="done"?" selected":"")+'>The job is completed</option>'+
+        '<option value="off"'+(r.sendWhen==="off"?" selected":"")+'>Off</option>'+
+      '</select></div>'+
+    '</div>'+
+    '<div class="field" style="margin-bottom:0"><label>Message template</label>'+
+      '<textarea id="set-reftpl">'+esc(r.template||"")+'</textarea></div>'+
+    '<div class="hint">Placeholders: {customer_name}, {company_name}, {referral_link}</div>'+
+    '</div></div>';
+}
 function dataCard(){
   return '<div class="panel"><h2>Data</h2><div class="panel-pad">'+
     '<div class="toolbar" style="margin-bottom:12px">'+
@@ -3242,7 +3303,7 @@ function aboutCard(){
 }
 function renderSettings(){
   shell("Settings","Business, services, backup",
-    bizCard()+servicesCard()+goalCard()+termsCard()+pinCard()+dataCard()+syncCard()+integrationsCard()+aboutCard());
+    bizCard()+servicesCard()+goalCard()+termsCard()+referralCard()+pinCard()+dataCard()+syncCard()+integrationsCard()+aboutCard());
   bindSettingsEvents();
 }
 function bindSettingsEvents(){
@@ -3261,6 +3322,16 @@ function bindSettingsEvents(){
     db.settings.terms.cancelFeePct=Math.max(0,Math.min(100,+fp.value||0));save();toast("Saved","ok");};
   const tt=$("#set-termstext");if(tt)tt.onchange=()=>{
     db.settings.terms.text=tt.value;save();toast("Saved","ok");};
+  const rtg=$("#set-reftg");if(rtg)rtg.onchange=()=>{
+    db.settings.referral.theyGet=Math.max(0,+rtg.value||0);save();toast("Saved","ok");};
+  const ryg=$("#set-refyg");if(ryg)ryg.onchange=()=>{
+    db.settings.referral.youGet=Math.max(0,+ryg.value||0);save();toast("Saved","ok");};
+  const rgc=$("#set-refgc");if(rgc)rgc.onchange=()=>{
+    db.settings.referral.giftCard=Math.max(0,+rgc.value||0);save();toast("Saved","ok");};
+  const rw=$("#set-refwhen");if(rw)rw.onchange=()=>{
+    db.settings.referral.sendWhen=rw.value;save();toast("Saved","ok");};
+  const rt=$("#set-reftpl");if(rt)rt.onchange=()=>{
+    db.settings.referral.template=rt.value;save();toast("Saved","ok");};
   const st=$("#set-stripe");if(st)st.onchange=()=>{db.settings.stripe.pk=st.value.trim();save();toast("Saved","ok");};
   const sm=$("#set-sms");if(sm)sm.onchange=()=>{db.settings.smsNumber=sm.value.trim();save();toast("Saved","ok");};
   const pn=$("#set-pin");if(pn)pn.onchange=()=>{

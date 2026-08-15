@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Refer a friend</title>
+<style>
+  :root{
+    color-scheme:dark;
+    --bg:#07080a; --panel:#121319; --line:rgba(255,255,255,.08);
+    --ink:#f5f6f8; --muted:#9aa1ab; --faint:#6b7280;
+    --sky:#7cc4fa; --on-sky:#06283d; --green:#34d399; --purple:#b794f6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.025) 0 1px,transparent 1px 56px),
+      repeating-linear-gradient(25deg,rgba(255,255,255,.02) 0 1px,transparent 1px 56px);
+    background-attachment:fixed}
+  .wrap{max-width:440px;margin:0 auto;
+    padding:calc(env(safe-area-inset-top,0px) + 34px) 20px calc(env(safe-area-inset-bottom,0px) + 40px)}
+  .word{font-size:24px;font-weight:800;font-style:italic;letter-spacing:-.5px;text-align:center;margin-bottom:8px}
+  .hero{font-size:28px;font-weight:800;letter-spacing:-.5px;text-align:center;margin-bottom:16px;color:var(--sky)}
+  .greet{font-size:14.5px;color:var(--muted);text-align:center;margin-bottom:22px}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:22px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 12px;text-align:center}
+  .tl{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--faint);text-transform:uppercase}
+  .tv{font-size:28px;font-weight:800;font-style:italic;margin-top:4px}
+  .ts{color:var(--muted);font-size:12px;margin-top:2px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:22px}
+  .field{margin-top:14px}
+  .field:first-child{margin-top:0}
+  .field label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px}
+  .field input{width:100%;background:#0d0e12;border:1px solid var(--line);border-radius:10px;
+    color:var(--ink);font-size:15px;padding:11px 13px;font-family:inherit}
+  .field input:focus{outline:none;border-color:var(--sky)}
+  .err-msg{color:#ff8a8a;font-size:13px;margin-top:12px;min-height:1px}
+  .cta{width:100%;margin-top:20px;border:0;border-radius:999px;background:var(--sky);color:var(--on-sky);
+    font-weight:800;font-size:16px;padding:16px;cursor:pointer;text-align:center}
+  .cta:active{filter:brightness(.95)}
+  .confirmed{margin-top:24px;text-align:center}
+  .confirmed .ck{width:52px;height:52px;border-radius:50%;background:rgba(52,211,153,.14);color:var(--green);
+    display:inline-flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:10px}
+  .confirmed .headline{font-weight:800;font-size:17px;color:var(--green)}
+  .confirmed .note{margin-top:6px;color:var(--muted);font-size:13px}
+  .nophone{margin-top:20px;text-align:center}
+  .nophone .hint{color:var(--muted);font-size:13px}
+  .msgbox{margin-top:10px;background:#0d0e12;border:1px solid var(--line);border-radius:12px;
+    padding:13px 15px;color:var(--ink);font-size:13.5px;text-align:left;white-space:pre-wrap}
+  .err-word{font-size:20px;font-weight:800;font-style:italic;text-align:center;margin-bottom:22px;color:var(--muted)}
+  .err-card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px;text-align:center;
+    color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+"use strict";
+function esc(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function fromBase64Url(str){
+  str=String(str||"").replace(/-/g,"+").replace(/_/g,"/");
+  while(str.length%4)str+="=";
+  return decodeURIComponent(escape(atob(str)));
+}
+function renderError(){
+  document.getElementById("app").innerHTML=
+    '<div class="err-word">Refer a friend</div>'+
+    '<div class="err-card">This link is incomplete.<br>Please ask for a new link.</div>';
+}
+function parseData(){
+  var qs=new URLSearchParams(location.search);
+  var raw=qs.get("d");
+  if(!raw)return null;
+  var d;
+  try{ d=JSON.parse(fromBase64Url(raw)); }catch(e){ return null; }
+  if(!d||typeof d!=="object")return null;
+  if(!d.biz||!d.ref)return null;
+  if(!isFinite(+d.tg)||!isFinite(+d.yg))return null;
+  return {
+    biz:String(d.biz),ph:String(d.ph||"").replace(/[^\d+]/g,""),ref:String(d.ref),
+    tg:+d.tg,yg:+d.yg,gc:isFinite(+d.gc)?+d.gc:0
+  };
+}
+function fmtDollar(n){n=+n||0;return "$"+(n%1?n.toFixed(2):n);}
+function render(){
+  var d=parseData();
+  if(!d){renderError();return;}
+  var app=document.getElementById("app");
+  app.innerHTML=
+    '<div class="word">'+esc(d.biz)+'</div>'+
+    '<div class="hero">Give '+fmtDollar(d.tg)+'. Get '+fmtDollar(d.yg)+'.</div>'+
+    '<div class="greet">Hi '+esc(d.ref)+', thanks for choosing '+esc(d.biz)+
+      '. Know someone who could use us? Send them over and you both get taken care of.</div>'+
+    '<div class="tiles">'+
+      '<div class="tile"><div class="tl">They get</div><div class="tv">'+fmtDollar(d.tg)+
+        '</div><div class="ts">off their first service</div></div>'+
+      '<div class="tile"><div class="tl">You get</div><div class="tv">'+fmtDollar(d.yg)+
+        '</div><div class="ts">off'+(d.gc>0?' or a '+fmtDollar(d.gc)+' gift card':'')+'</div></div>'+
+    '</div>'+
+    '<div class="card">'+
+      '<div class="field"><label>First name*</label><input id="rf-first" placeholder="Jane"></div>'+
+      '<div class="field"><label>Last name</label><input id="rf-last" placeholder="Doe"></div>'+
+      '<div class="field"><label>Phone number*</label><input id="rf-phone" type="tel" placeholder="(555) 555-5555"></div>'+
+      '<div class="field" style="margin-bottom:0"><label>Address (optional)</label>'+
+        '<input id="rf-addr" placeholder="123 Main St"></div>'+
+      '<div class="err-msg" id="rf-err"></div>'+
+    '</div>'+
+    '<div id="cta-area"><button class="cta" id="send-btn">Send referral</button></div>';
+  document.getElementById("send-btn").onclick=function(){submit(d);};
+}
+function submit(d){
+  var first=(document.getElementById("rf-first").value||"").trim();
+  var last=(document.getElementById("rf-last").value||"").trim();
+  var phone=(document.getElementById("rf-phone").value||"").trim();
+  var addr=(document.getElementById("rf-addr").value||"").trim();
+  var errEl=document.getElementById("rf-err");
+  if(!first||!phone){errEl.textContent="Please fill in your first name and phone number.";return;}
+  errEl.textContent="";
+  var msg="Referral from "+d.ref+": "+first+(last?" "+last:"")+", "+phone+(addr?", "+addr:"");
+  if(d.ph){
+    document.getElementById("cta-area").innerHTML=
+      '<div class="confirmed">'+
+        '<div class="ck">&#10003;</div>'+
+        '<div class="headline">Thanks &mdash; referral sent!</div>'+
+        '<div class="note">A confirmation text is opening &mdash; please press send.</div>'+
+      '</div>';
+    location.href="sms:+"+d.ph+"?&body="+encodeURIComponent(msg);
+  }else{
+    showCopyFallback(msg);
+  }
+}
+function showCopyFallback(msg){
+  document.getElementById("cta-area").innerHTML=
+    '<div class="nophone">'+
+      '<div class="hint">No business phone on file &mdash; copy this and text it over yourself:</div>'+
+      '<div class="msgbox">'+esc(msg)+'</div>'+
+      '<button class="cta" id="copy-btn">Copy referral text</button>'+
+    '</div>';
+  document.getElementById("copy-btn").onclick=function(){
+    var done=function(){
+      var b=document.getElementById("copy-btn");if(b)b.textContent="Copied ✓";
+    };
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+      navigator.clipboard.writeText(msg).then(done).catch(function(){prompt("Copy this text:",msg);});
+    else prompt("Copy this text:",msg);
+  };
+}
+render();
+</script>
+</body>
+</html>
