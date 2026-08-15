@@ -285,7 +285,7 @@
     justify-content:center;padding:34px 16px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .overlay.show{display:flex}
   body:has(.overlay.show){overflow:hidden} /* page behind a modal must not scroll */
-  #cust-overlay{z-index:50} #job-overlay{z-index:60} #slot-overlay{z-index:65} #invoice-overlay,#plan-overlay{z-index:70}
+  #cust-overlay{z-index:50} #job-overlay{z-index:60} #invoice-overlay,#plan-overlay{z-index:70}
   #sign-overlay{z-index:80}
   .modal{background:#15161c;border:1px solid var(--line);border-radius:20px;width:100%;max-width:640px;box-shadow:var(--shadow-lg);margin:auto 0}
   .modal.lg{max-width:760px} .modal.sm{max-width:520px}
@@ -429,14 +429,6 @@
     <button class="x" data-close="job-overlay" aria-label="Close">&times;</button></div>
   <div class="modal-body" id="job-body"></div>
   <div class="modal-foot" id="job-foot"></div>
-</div></div>
-
-<!-- Slot services editor (merged card, owner only) -->
-<div class="overlay" id="slot-overlay"><div class="modal">
-  <div class="modal-head"><div><h3 id="slot-title">Edit visit</h3><div class="hsub" id="slot-hsub"></div></div>
-    <button class="x" data-close="slot-overlay" aria-label="Close">&times;</button></div>
-  <div class="modal-body" id="slot-body"></div>
-  <div class="modal-foot" id="slot-foot"></div>
 </div></div>
 
 <!-- Customer / lead sheet -->
@@ -1275,7 +1267,6 @@ let schedDay=today();               // ISO day the timeline/week centers on — 
 let schedView=uiPref().schedView||"day"; // day | week — persisted across sessions via uiSet
 let schedCrew="all";                // "all" or a user id — in-memory only
 let editJob=null;                   // job id open in the modal, null while creating
-let editSlot=null;                  // {customerId,date,time} open in the slot editor, null while closed
 
 function tlTimeRange(t){if(!t)return"";const[h,m]=t.split(":").map(Number);let eh=h+1,em=m;if(eh>23){eh=23;em=59;}
   return fmtTime(t)+" - "+fmtTime(eh+":"+em);}
@@ -1393,7 +1384,7 @@ function tlGroupCard(g){
   const done=g.jobs.every(x=>x.status==="done");
   const range=j.time?tlTimeRange(j.time):"";
   const rows=g.jobs.map(x=>'<div class="tl-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
-  return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'" data-slotgroup="1">'+
+  return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
     '<div class="n">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
     rows+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
@@ -1428,7 +1419,7 @@ function weekGroupCard(g){
   const j=g.job,c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=g.jobs.every(x=>x.status==="done");
   const rows=g.jobs.map(x=>'<div class="wk-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
-  return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'" data-slotgroup="1">'+
+  return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
     '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
     rows+
@@ -1459,18 +1450,10 @@ function renderSchedule(){
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
     // stopPropagation: a merged card nests one data-jobcard row per job (see tlGroupCard/
     // weekGroupCard) — without it, a tap on a row would bubble to the card's own handler too.
-    // Owner (never a rep — isRep() keeps the old per-job behavior) tapping ANYWHERE on a merged
-    // card (data-slotgroup, 2+ jobs) opens the slot editor instead of an arbitrary job's modal —
-    // one predictable behavior instead of "whichever job you happened to tap".
-    el.onclick=e=>{
-      e.stopPropagation();
-      const grp=!isRep()&&el.closest("[data-slotgroup]");
-      if(grp){
-        const gj=db.jobs.find(x=>x.id===+grp.dataset.jobcard);
-        if(gj){openSlotEditor(gj.customerId,gj.date,gj.time||"");return;}
-      }
-      openJob(+el.dataset.jobcard);
-    };
+    // Every data-jobcard element — solo card, merged card, or a row inside one — opens its own
+    // job through the normal job modal; jobForm renders a "Services" editor inline when that
+    // job has siblings (slotSiblings), so a merged slot never needs a separate modal.
+    el.onclick=e=>{e.stopPropagation();openJob(+el.dataset.jobcard);};
   });
   document.querySelectorAll("[data-tlhour]").forEach(el=>{
     el.onclick=e=>{if(e.target.closest("[data-jobcard]"))return;
@@ -1534,8 +1517,13 @@ function jobForm(j,preset){
       '<div class="field" id="jf-commwrap" style="'+(closerId?"":"display:none")+'"><label>Commission %</label>'+
         '<input id="jf-comm" type="number" min="0" max="100" step="1" value="'+commVal+'"></div>'+
     '</div>';
+  // A merged schedule card (groupSlotJobs) folds several same-visit jobs into one card — editing
+  // one now edits the whole visit: the single Service+Price pair is swapped for a checkbox row
+  // per service (slotServicesField/applySlotServices), everything else in the form is unchanged.
+  const siblings=j?slotSiblings(j):[];
+  const svcField=siblings.length>1?slotServicesField(siblings):svcPriceBlock;
   return '<div class="field"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>'+
-    svcPriceBlock+
+    svcField+
     '<div class="grid3">'+
       '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
       '<div class="field"><label>Time</label><input id="jf-time" type="time" value="'+esc(time)+'"></div>'+
@@ -1545,12 +1533,15 @@ function jobForm(j,preset){
     '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
 }
 function jobFoot(j){
-  const showConfirm=j&&j.status==="scheduled";
+  const showConfirm=j&&j.status==="scheduled"; // confirm-booking link always targets the first job of a slot
+  // Slot mode (2+ jobs in the visit): Done/Not-done reflect the WHOLE visit, not just the first job.
+  const siblings=j?slotSiblings(j):[];
+  const allDone=siblings.length>1?siblings.every(x=>x.status==="done"):(j&&j.status==="done");
   return (j&&!isRep()?'<button class="btn del" id="jf-delete">Delete</button>':'')+ // reps never delete money records
     (showConfirm?'<button class="btn sm" id="jf-confirm">'+(j.termsAcceptedAt?"✓ Confirmed":"📋 Confirm")+'</button>':'')+
     '<span class="spacer"></span>'+
-    (j&&j.status!=="done"?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
-    (j&&j.status==="done"?'<button class="btn sm" id="jf-undone">↩ Not done</button>':'')+
+    (j&&!allDone?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
+    (j&&allDone?'<button class="btn sm" id="jf-undone">↩ Not done</button>':'')+
     '<button class="btn btn-primary" id="jf-save">Save</button>';
 }
 function saveJobBtn(){
@@ -1587,6 +1578,37 @@ function saveJobBtn(){
   }
   const cid=+$("#jf-cust").value||null;
   if(!cid){toast("Pick a customer for this job","err");return;}
+  const curJob=editJob?db.jobs.find(x=>x.id===editJob):null;
+  const siblings=curJob?slotSiblings(curJob):[];
+  if(siblings.length>1){
+    // Slot mode: the form has no single service/price — shared fields apply to every job in
+    // the visit, then applySlotServices reconciles the checkbox rows (create/update/delete).
+    const date=$("#jf-date").value||today();
+    const time=$("#jf-time").value||"";
+    const durMin=+$("#jf-dur").value||60;
+    const notes=($("#jf-notes").value||"").trim();
+    const closerSel=$("#jf-closer");
+    const closerVal=closerSel?closerSel.value:"";
+    const closerId=closerVal?+closerVal:null;
+    const commissionPct=closerVal?Math.max(0,Math.min(100,+$("#jf-comm").value||0)):0;
+    siblings.forEach(sj=>{
+      const shared={customerId:cid,date,time,durMin,notes};
+      // Same isSplit guard as the solo path — a split job's credit is data-level only, never
+      // overwritten from this form.
+      if(!(Array.isArray(sj.splits)&&sj.splits.length)){shared.closerId=closerId;shared.commissionPct=commissionPct;}
+      updateJob(sj.id,shared);
+    });
+    const entries=[];
+    document.querySelectorAll("#job-body [data-svc]").forEach(row=>{
+      entries.push({service:row.dataset.svc,on:row.querySelector(".slot-chk").checked,
+        price:+row.querySelector(".slot-price").value||0});
+    });
+    const r=applySlotServices(cid,date,time,entries); // key is the NEW date/time — jobs already moved above
+    closeModal("job-overlay");render();
+    toast(r.blocked.length?r.blocked.length+" done job"+(r.blocked.length===1?"":"s")+" kept — mark not-done first to remove":"Job saved",
+      r.blocked.length?"err":"ok");
+    return;
+  }
   const data={
     customerId:cid,
     service:$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:""),
@@ -1599,7 +1621,6 @@ function saveJobBtn(){
   if(!editJob)data.crewIds=[]; // crew field removed from the form; edits leave existing crewIds alone
   // A split job has no closer/commission select on the form (jobForm) — skip those fields
   // entirely so the merge in updateJob leaves j.splits (and its closerId/commissionPct) untouched.
-  const curJob=editJob?db.jobs.find(x=>x.id===editJob):null;
   const isSplit=!!(curJob&&Array.isArray(curJob.splits)&&curJob.splits.length);
   if(!isSplit){
     const closerVal=$("#jf-closer").value;
@@ -1613,8 +1634,11 @@ function openJob(id,preset){
   editJob=id;
   const j=id?db.jobs.find(x=>x.id===id):null;
   const c=j?custById(j.customerId):((preset&&preset.customerId)?custById(preset.customerId):null);
+  const siblings=j?slotSiblings(j):[];
+  const isSlot=siblings.length>1;
   $("#job-title").textContent=j?"Edit job":"New job";
-  $("#job-hsub").textContent=c?c.name:"";
+  // Slot mode gets a small combined-total hint next to the customer name — subtle, not a redesign.
+  $("#job-hsub").textContent=(c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":"");
   $("#job-body").innerHTML=jobForm(j,preset);
   $("#job-foot").innerHTML=jobFoot(j);
   const cust=$("#jf-cust");
@@ -1629,8 +1653,8 @@ function openJob(id,preset){
     cust.insertBefore(opt,cust.lastElementChild);cust.value=c2.id;
     toast("Client created — "+c2.name,"ok");
   };
-  const svc=$("#jf-service");
-  svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
+  const svc=$("#jf-service"); // absent in slot mode — the Services field has no single service/price pair
+  if(svc)svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
   const closer=$("#jf-closer");
   if(closer)closer.onchange=()=>{
     const o=closer.selectedOptions[0],wrap=$("#jf-commwrap");
@@ -1640,26 +1664,51 @@ function openJob(id,preset){
   $("#jf-save").onclick=saveJobBtn;
   const del=$("#jf-delete");if(del)del.onclick=()=>{
     if(!editJob)return;
-    deleteJob(editJob);closeModal("job-overlay");render();toast("Job deleted","ok");
+    // Re-read fresh from the db rather than trusting the closed-over `siblings` — nothing else
+    // should have moved the record between opening the modal and this click, but this is cheap
+    // and matches the done/undone pattern below.
+    const cj=db.jobs.find(x=>x.id===editJob),sibs=cj?slotSiblings(cj):[];
+    if(sibs.length>1){
+      if(!confirm("Delete "+sibs.length+" jobs for "+(c?c.name:"this customer")+"?"))return;
+      sibs.forEach(sj=>deleteJob(sj.id));
+      closeModal("job-overlay");render();toast("Jobs deleted","ok");
+    }else{
+      deleteJob(editJob);closeModal("job-overlay");render();toast("Job deleted","ok");
+    }
   };
   const done=$("#jf-done");if(done)done.onclick=()=>{
-    completeJobFlow(editJob);closeModal("job-overlay");render();
+    const cj=db.jobs.find(x=>x.id===editJob),sibs=cj?slotSiblings(cj):[];
+    if(sibs.length>1)completeSlot(cj.customerId,cj.date,cj.time||""); // one combined payment question
+    else completeJobFlow(editJob);
+    closeModal("job-overlay");render();
     toast("Job marked done","ok");
   };
   const undone=$("#jf-undone");if(undone)undone.onclick=()=>{
     const jj=db.jobs.find(x=>x.id===editJob);
-    if(jj&&(+jj.collected||0)>0&&!confirm("This job shows "+money(jj.collected)+" collected — undoing clears that. Sure?"))return;
-    uncompleteJob(editJob);closeModal("job-overlay");render();
+    const sibs=jj?slotSiblings(jj):[];
+    if(sibs.length>1){
+      if(sibs.some(x=>(+x.collected||0)>0)&&!confirm("This visit shows money collected — undoing clears that. Sure?"))return;
+      sibs.forEach(sj=>{if(sj.status==="done")uncompleteJob(sj.id);});
+    }else{
+      if(jj&&(+jj.collected||0)>0&&!confirm("This job shows "+money(jj.collected)+" collected — undoing clears that. Sure?"))return;
+      uncompleteJob(editJob);
+    }
+    closeModal("job-overlay");render();
     toast("Back on the schedule","ok");
   };
   const conf=$("#jf-confirm");if(conf)conf.onclick=()=>openBookingConfirm(editJob);
   openModal("job-overlay");
 }
 
-/* --- slot services editor (merged card, owner only) ---
+/* --- slot services (merged card, rendered inline inside the normal job modal) ---
    A merged card is display-only folding (groupSlotJobs) — the real jobs underneath still carry
-   their own money. This lets the owner add/remove/reprice each service in one slot without
-   guessing which job a tap on the card meant. */
+   their own money. When the edited job has siblings, jobForm swaps the single Service+Price pair
+   for the checkbox rows below so the owner can add/remove/reprice each service in one visit. */
+/* Same visit, same customer+date+time — the full set of jobs a merged schedule card folds into
+   one (see groupSlotJobs), including j itself. Cancelled jobs are never part of the visit. */
+function slotSiblings(j){
+  return db.jobs.filter(x=>x.customerId===j.customerId&&x.date===j.date&&(x.time||"")===(j.time||"")&&x.status!=="cancelled");
+}
 /* PURE data op: no DOM, no modal calls — same shape as createJob/updateJob/deleteJob, which it
    calls. entries=[{service,on,price}]. Never touches a job outside this customerId+date+time slot.
    A checked-off DONE job is never deleted (money records don't die from an unchecked box) — it's
@@ -1689,9 +1738,9 @@ function applySlotServices(customerId,date,time,entries){
 }
 /* One row per db.settings.services entry, plus a trailing row for any job in the slot whose
    service isn't in settings anymore (legacy — still editable, not silently hidden). */
-/* Same visual language as the job form: a Services field of checkbox rows, price inline.
-   No per-service status or Done — the VISIT is the unit the homeowner pays for. */
-function slotRow(name,job,defaultPrice){
+/* Same visual language as the rest of the job form: a Services field of checkbox rows, price
+   inline. No per-service status or Done — the VISIT is the unit the homeowner pays for. */
+function svcRow(name,job,defaultPrice){
   const price=job?job.price:defaultPrice;
   return '<div class="jobline" style="cursor:default;padding:8px 0" data-svc="'+esc(name)+'">'+
     '<label class="crew-chk" style="flex:1;min-width:0">'+
@@ -1701,6 +1750,15 @@ function slotRow(name,job,defaultPrice){
     '<div class="field pre" style="margin:0;flex:0 0 96px"><span class="sym">$</span>'+
       '<input class="slot-price" type="number" min="0" step="1" value="'+(+price||0)+'"></div>'+
   '</div>';
+}
+/* The "Services" field jobForm renders in place of the solo Service+Price pair once the edited
+   job has siblings. saveJobBtn reads it back via the same [data-svc]/.slot-chk/.slot-price hooks. */
+function slotServicesField(jobs){
+  const svcNames=new Set(db.settings.services.map(s=>s.name));
+  const rows=db.settings.services.map(s=>svcRow(s.name,jobs.find(j=>j.service===s.name),s.price))
+    .concat(jobs.filter(j=>!svcNames.has(j.service)).map(j=>svcRow(j.service,j,j.price)))
+    .join("");
+  return '<div class="field"><label>Services</label>'+(rows||'<div class="panel-pad empty">No services configured.</div>')+'</div>';
 }
 /* One Done for the whole visit: every scheduled job in the slot flips together, ONE collected
    question for the combined total, and each job books its own price share so per-service money
@@ -1716,47 +1774,6 @@ function completeSlot(customerId,date,time){
   save();
   if(jobs.some(j=>j.planId))ensurePlanJobs();
   return jobs;
-}
-function slotBody(customerId,date,time){
-  const jobs=db.jobs.filter(j=>j.customerId===customerId&&j.date===date&&(j.time||"")===(time||"")&&j.status!=="cancelled");
-  const svcNames=new Set(db.settings.services.map(s=>s.name));
-  const rows=db.settings.services.map(s=>slotRow(s.name,jobs.find(j=>j.service===s.name),s.price))
-    .concat(jobs.filter(j=>!svcNames.has(j.service)).map(j=>slotRow(j.service,j,j.price)))
-    .join("");
-  return rows||'<div class="panel-pad empty">No services configured.</div>';
-}
-function saveSlotBtn(quiet){
-  if(!editSlot)return;
-  const entries=[];
-  document.querySelectorAll("#slot-body [data-svc]").forEach(row=>{
-    entries.push({service:row.dataset.svc,on:row.querySelector(".slot-chk").checked,
-      price:+row.querySelector(".slot-price").value||0});
-  });
-  const r=applySlotServices(editSlot.customerId,editSlot.date,editSlot.time,entries);
-  if(quiet)return; // ✓ Done calls this first, then completes the visit and closes itself
-  closeModal("slot-overlay");render();
-  toast(r.blocked.length?r.blocked.length+" done job"+(r.blocked.length===1?"":"s")+" kept — mark not-done first to remove":"Saved",
-    r.blocked.length?"err":"ok");
-}
-function openSlotEditor(customerId,date,time){
-  editSlot={customerId,date,time};
-  const c=custById(customerId);
-  const slotJobs=db.jobs.filter(j=>j.customerId===customerId&&j.date===date&&(j.time||"")===(time||"")&&j.status!=="cancelled");
-  const open=slotJobs.filter(j=>j.status==="scheduled");
-  const allDone=slotJobs.length&&!open.length;
-  $("#slot-title").textContent=c?c.name:"(deleted customer)";
-  $("#slot-hsub").textContent=fmtDate(date)+(time?" · "+fmtTime(time):"")+(allDone?" · ✓ done":"");
-  $("#slot-body").innerHTML='<div class="field"><label>Services</label>'+slotBody(customerId,date,time)+'</div>';
-  $("#slot-foot").innerHTML='<span class="spacer"></span>'+
-    (open.length?'<button class="btn btn-green" id="slot-done">✓ Done</button>':'')+
-    '<button class="btn btn-primary" id="slot-save">Save</button>';
-  const sd=$("#slot-done");if(sd)sd.onclick=()=>{
-    saveSlotBtn(true); // prices/services as edited, then complete the visit in one shot
-    completeSlot(customerId,date,time);
-    closeModal("slot-overlay");render();toast("Job marked done","ok");
-  };
-  $("#slot-save").onclick=()=>saveSlotBtn();
-  openModal("slot-overlay");
 }
 
 /* ---------------- Leads + Clients (screens 4-5) ----------------
@@ -3296,7 +3313,7 @@ function bindSyncCard(){
 }
 
 /* ---------------- Modal plumbing ---------------- */
-const MODALS=["job-overlay","slot-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay"];
+const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay"];
 function openModal(id){const o=$("#"+id);if(o)o.classList.add("show");}
 function closeModal(id){const o=$("#"+id);if(o)o.classList.remove("show");}
 function closeAllModals(){MODALS.forEach(closeModal);}
