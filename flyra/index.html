@@ -1758,7 +1758,15 @@ function openJob(id,preset){
   const isSlot=siblings.length>1;
   $("#job-title").textContent=j?"Edit job":"New job";
   // Slot mode gets a small combined-total hint next to the customer name — subtle, not a redesign.
-  $("#job-hsub").textContent=(c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":"");
+  // The ✎ chip opens the full client editor right from the job (cust-overlay gets a temporary
+  // z-index bump so it stacks ABOVE this modal; closeModal resets it).
+  $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
+    (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"");
+  const ecBtn=$("#jf-editcust");
+  if(ecBtn)ecBtn.onclick=()=>{
+    const ov=$("#cust-overlay");if(ov&&ov.style)ov.style.zIndex="65";
+    openCustEdit(c.id);
+  };
   $("#job-body").innerHTML=jobForm(j,preset);
   $("#job-foot").innerHTML=jobFoot(j);
   const cust=$("#jf-cust");
@@ -3860,7 +3868,16 @@ function bindSyncCard(){
 /* ---------------- Modal plumbing ---------------- */
 const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay"];
 function openModal(id){const o=$("#"+id);if(o)o.classList.add("show");}
-function closeModal(id){const o=$("#"+id);if(o)o.classList.remove("show");}
+function closeModal(id){
+  const o=$("#"+id);if(o)o.classList.remove("show");
+  // Client editor opened from the job modal rides above it on a temporary z bump — undo it and
+  // repaint the job modal so a renamed client shows immediately.
+  if(id==="cust-overlay"&&o){
+    if(o.style)o.style.zIndex="";
+    const jo=$("#job-overlay");
+    if(editJob&&jo&&jo.classList&&jo.classList.contains&&jo.classList.contains("show"))openJob(editJob);
+  }
+}
 function closeAllModals(){MODALS.forEach(closeModal);}
 // A tap closes a modal only if it STARTED on the backdrop — a scroll drag that ends past the
 // modal's edge otherwise lands on the overlay and dismisses it mid-scroll on phones.
