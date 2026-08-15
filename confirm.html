@@ -27,10 +27,17 @@
   .svc{font-size:19px;font-weight:800}
   .when{color:var(--muted);font-style:italic;font-size:14px;margin-top:4px}
   .price{font-size:36px;font-weight:800;font-style:italic;letter-spacing:-.5px;margin-top:14px}
-  .terms-label{margin-top:22px;font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--faint);
-    text-transform:uppercase}
-  .terms-text{margin-top:8px;color:var(--muted);font-size:13.5px;white-space:pre-wrap}
-  .fee-line{margin-top:10px;font-weight:700;font-size:13.5px}
+  .tc-row{display:flex;align-items:flex-start;gap:11px;margin-top:22px}
+  .tc-row input{width:19px;height:19px;margin-top:1px;accent-color:var(--sky);flex-shrink:0}
+  .tc-main{font-size:14px;font-weight:600}
+  .tc-hint{color:var(--faint);font-size:12px;margin-top:2px}
+  .tc-hint a{color:var(--sky);text-decoration:none;cursor:pointer}
+  .terms-body{display:none;margin-top:12px;background:#0d0e12;border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+  .terms-body.open{display:block}
+  .terms-label{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
+  .terms-text{margin-top:8px;color:var(--muted);font-size:13px;white-space:pre-wrap}
+  .fee-line{margin-top:10px;font-weight:700;font-size:13px}
+  .cta:disabled{opacity:.45;cursor:default}
   .cta{width:100%;margin-top:24px;border:0;border-radius:999px;background:var(--sky);color:var(--on-sky);
     font-weight:800;font-size:16px;padding:16px;cursor:pointer;text-align:center}
   .cta:active{filter:brightness(.95)}
@@ -117,16 +124,30 @@ function render(){
       '<div class="svc">'+esc(d.s)+'</div>'+
       '<div class="when">'+esc(longDate)+(timeStr?' &middot; '+esc(timeStr):'')+'</div>'+
       '<div class="price">'+esc(fmtMoney(d.p))+'</div>'+
-      '<div class="terms-label">Terms &amp; conditions</div>'+
-      '<div class="terms-text">'+esc(termsText)+'</div>'+
-      '<div class="fee-line">Cancellations within 24 hours of the visit carry a '+esc(d.f)+'% fee.</div>'+
+      '<div class="tc-row"><input type="checkbox" id="tc-check" aria-label="Accept terms">'+
+        '<div><div class="tc-main">I accept the terms and conditions</div>'+
+        '<div class="tc-hint"><a id="tc-review">Tap to review</a></div></div></div>'+
+      '<div class="terms-body" id="terms-body">'+
+        '<div class="terms-label">Terms &amp; conditions</div>'+
+        '<div class="terms-text">'+esc(termsText)+'</div>'+
+        '<div class="fee-line">Cancellations within 24 hours of the visit carry a '+esc(d.f)+'% fee.</div>'+
+      '</div>'+
     '</div>'+
     '<div id="cta-area">'+
-      '<button class="cta" id="agree-btn">Agree &amp; Confirm</button>'+
+      '<button class="cta" id="agree-btn" disabled>Agree &amp; Confirm</button>'+
     '</div>'+
     (d.ph?'<div class="call">Prefer to call? <a href="tel:+'+esc(d.ph)+'">'+esc(phoneFmt)+'</a></div>':'');
+  var check=document.getElementById("tc-check");
+  var review=document.getElementById("tc-review");
   var btn=document.getElementById("agree-btn");
+  if(check)check.onchange=function(){btn.disabled=!check.checked;};
+  if(review)review.onclick=function(e){e.preventDefault();
+    var tb=document.getElementById("terms-body");
+    tb.classList.toggle("open");
+    review.textContent=tb.classList.contains("open")?"Hide":"Tap to review";
+  };
   if(btn)btn.onclick=function(){
+    if(check&&!check.checked)return;
     document.getElementById("cta-area").innerHTML=
       '<div class="confirmed">'+
         '<div class="ck">&#10003;</div>'+
