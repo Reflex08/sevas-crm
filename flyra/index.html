@@ -1600,9 +1600,10 @@ function saveJobBtn(){
     });
     const entries=[];
     document.querySelectorAll("#job-body [data-svc]").forEach(row=>{
-      entries.push({service:row.dataset.svc,on:row.querySelector(".slot-chk").checked,
-        price:+row.querySelector(".slot-price").value||0});
+      entries.push({service:row.dataset.svc,on:true,price:+row.querySelector(".slot-price").value||0});
     });
+    // A sibling service whose row was ✕-removed from the list is an explicit off.
+    siblings.forEach(sj=>{if(!entries.some(e=>e.service===sj.service))entries.push({service:sj.service,on:false,price:0});});
     const r=applySlotServices(cid,date,time,entries); // key is the NEW date/time — jobs already moved above
     closeModal("job-overlay");render();
     toast(r.blocked.length?r.blocked.length+" done job"+(r.blocked.length===1?"":"s")+" kept — mark not-done first to remove":"Job saved",
@@ -1655,6 +1656,7 @@ function openJob(id,preset){
   };
   const svc=$("#jf-service"); // absent in slot mode — the Services field has no single service/price pair
   if(svc)svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
+  bindSvcField(); // slot mode only — no-op when #jf-svcfield isn't in the form
   const closer=$("#jf-closer");
   if(closer)closer.onchange=()=>{
     const o=closer.selectedOptions[0],wrap=$("#jf-commwrap");
@@ -1736,29 +1738,45 @@ function applySlotServices(customerId,date,time,entries){
   });
   return out;
 }
-/* One row per db.settings.services entry, plus a trailing row for any job in the slot whose
-   service isn't in settings anymore (legacy — still editable, not silently hidden). */
-/* Same visual language as the rest of the job form: a Services field of checkbox rows, price
-   inline. No per-service status or Done — the VISIT is the unit the homeowner pays for. */
-function svcRow(name,job,defaultPrice){
-  const price=job?job.price:defaultPrice;
+/* One row per service the visit actually HAS (name · price · ✕) — uncommon services don't sit
+   there as unchecked clutter. New ones come in through the "＋ Add service…" dropdown below. */
+function svcRow(name,price){
   return '<div class="jobline" style="cursor:default;padding:8px 0" data-svc="'+esc(name)+'">'+
-    '<label class="crew-chk" style="flex:1;min-width:0">'+
-      '<input type="checkbox" class="slot-chk"'+(job?" checked":"")+'>'+
-      '<span class="nm">'+esc(name)+'</span>'+
-    '</label>'+
+    '<div class="nm" style="flex:1;min-width:0">'+esc(name)+'</div>'+
     '<div class="field pre" style="margin:0;flex:0 0 96px"><span class="sym">$</span>'+
       '<input class="slot-price" type="number" min="0" step="1" value="'+(+price||0)+'"></div>'+
+    '<button type="button" class="btn sm" data-rmsvc="'+esc(name)+'" title="Remove service">✕</button>'+
   '</div>';
 }
 /* The "Services" field jobForm renders in place of the solo Service+Price pair once the edited
-   job has siblings. saveJobBtn reads it back via the same [data-svc]/.slot-chk/.slot-price hooks. */
+   job has siblings. saveJobBtn reads present rows as on, missing sibling services as off. */
 function slotServicesField(jobs){
-  const svcNames=new Set(db.settings.services.map(s=>s.name));
-  const rows=db.settings.services.map(s=>svcRow(s.name,jobs.find(j=>j.service===s.name),s.price))
-    .concat(jobs.filter(j=>!svcNames.has(j.service)).map(j=>svcRow(j.service,j,j.price)))
-    .join("");
-  return '<div class="field"><label>Services</label>'+(rows||'<div class="panel-pad empty">No services configured.</div>')+'</div>';
+  const rows=jobs.map(j=>svcRow(j.service,j.price)).join("");
+  const have=new Set(jobs.map(j=>j.service));
+  const opts=db.settings.services.filter(s=>!have.has(s.name))
+    .map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'">'+esc(s.name)+'</option>').join("");
+  // The select always renders (maybe with no options yet) so a removed row's service can return to it.
+  return '<div class="field" id="jf-svcfield"><label>Services</label>'+rows+
+    '<select id="jf-addsvc" style="margin-top:6px"><option value="">＋ Add service…</option>'+opts+'</select>'+
+  '</div>';
+}
+/* The dropdown adds a row; ✕ removes one. All DOM-side until Save reads the rows back. */
+function bindSvcField(){
+  const wrap=$("#jf-svcfield");if(!wrap)return;
+  const sel=$("#jf-addsvc");
+  if(sel)sel.onchange=()=>{
+    const o=sel.selectedOptions[0];
+    if(!sel.value)return;
+    sel.insertAdjacentHTML("beforebegin",svcRow(sel.value,+o.dataset.price||0));
+    o.remove();sel.value="";
+    bindSvcField();
+  };
+  wrap.querySelectorAll("[data-rmsvc]").forEach(b=>b.onclick=()=>{
+    const name=b.dataset.rmsvc,row=b.closest("[data-svc]");
+    row.remove();
+    const s=db.settings.services.find(x=>x.name===name);
+    if(s&&sel)sel.insertAdjacentHTML("beforeend",'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'">'+esc(s.name)+'</option>');
+  });
 }
 /* One Done for the whole visit: every scheduled job in the slot flips together, ONE collected
    question for the combined total, and each job books its own price share so per-service money
