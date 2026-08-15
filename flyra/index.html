@@ -1285,10 +1285,10 @@ function dayJobs(date){
   return jobs.sort((a,b)=>(a.time||"").localeCompare(b.time||""));
 }
 function dayRev(date){return dayJobs(date).reduce((s,j)=>s+(j.status==="done"?(+j.collected||0):(+j.price||0)),0);}
-/* The Monday-start week containing an ISO date, as 7 ISO strings. */
+/* Rolling 7 days STARTING at the given date (owner's order: today first, never last Monday —
+   "I don't want to see what was a week ago"). */
 function weekDates(iso){
   const d=new Date(iso+"T12:00:00");
-  d.setDate(d.getDate()-((d.getDay()+6)%7));
   const out=[];for(let i=0;i<7;i++){out.push(localISO(d));d.setDate(d.getDate()+1);}
   return out;
 }
@@ -1352,10 +1352,10 @@ function schedHeader(){
     '</div>'+
     '<button class="nb" data-dnav="-'+step+'" aria-label="Back">‹</button>'+
     '<button class="nb" data-dnav="'+step+'" aria-label="Forward">›</button>'+
-    '<div class="fpill">'+(schedView==="day"?"Day":"Week")+' ⌄'+
+    '<div class="fpill">'+(schedView==="day"?"Day":"7 days")+' ⌄'+
       '<select id="sched-view" aria-label="Schedule view">'+
         '<option value="day"'+(schedView==="day"?" selected":"")+'>Day</option>'+
-        '<option value="week"'+(schedView==="week"?" selected":"")+'>Week</option>'+
+        '<option value="week"'+(schedView==="week"?" selected":"")+'>7 days</option>'+
       '</select></div>'+
     '<div class="fpill">👥 '+esc(crewLabel)+' ⌄'+
       '<select id="sched-crew" aria-label="Crew filter">'+crewOpts+'</select></div>'+
