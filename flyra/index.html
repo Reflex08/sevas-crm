@@ -1679,7 +1679,7 @@ function saveJobBtn(){
       if(!name){toast("Name is required","err");return;}
       // Same shape as the "__new" quick-add customer below, with name/phone/street/ownerId from the form.
       c=Object.assign({id:db.seqC++,name:"",phone:"",email:"",street:"",city:"Toronto",lat:null,lng:null,
-        stage:"won",source:"Manual",tags:[],notes:"",log:[],createdAt:Date.now(),ownerId:1,followup:""},
+        stage:"won",source:"Door-to-door",tags:[],notes:"",log:[],createdAt:Date.now(),ownerId:1,followup:""},
         {name,phone:($("#jf-phone").value||"").trim(),street:($("#jf-street").value||"").trim(),
          ownerId:me.id,log:[{t:Date.now(),m:"Booked by "+me.name}]});
       db.customers.push(c);save();
@@ -1767,7 +1767,7 @@ function openJob(id,preset){
     const name=(prompt("New client name:")||"").trim();
     if(!name){cust.value=j&&j.customerId?String(j.customerId):"";return;}
     const c2={id:db.seqC++,name,phone:"",email:"",street:"",city:"Toronto",lat:null,lng:null,
-      stage:"won",source:"Manual",tags:[],notes:"",log:[],createdAt:Date.now(),ownerId:1,followup:""};
+      stage:"won",source:"Door-to-door",tags:[],notes:"",log:[],createdAt:Date.now(),ownerId:1,followup:""};
     db.customers.push(c2);save();
     const opt=document.createElement("option");opt.value=c2.id;opt.textContent=c2.name;
     cust.insertBefore(opt,cust.lastElementChild);cust.value=c2.id;
@@ -1911,6 +1911,8 @@ function completeSlot(customerId,date,time){
 /* ---------------- Leads + Clients (screens 4-5) ----------------
    One list engine, two screens: "leads" opens on every stage, "customers" on Won only.
    STAGES is the pipeline order — ‹ › walk it one step at a time. */
+/* Canonical lead sources (owner's list) — where a client actually came from. */
+const LEAD_SOURCES=["Door-to-door","Meta Ads","Google Ads","Referral","Website","Word of mouth","Repeat customer","Other"];
 const SORTS=[["new","Newest"],["name","Name A–Z"],["value","Value: high → low"]];
 const LIST={leads:{filter:"all",q:"",searchOpen:false,sort:"new",page:0,size:25},
             customers:{filter:"won",q:"",searchOpen:false,sort:"new",page:0,size:25}};
@@ -1921,7 +1923,7 @@ const PILLSEL="border-radius:999px;padding:5px 11px;background:#0d0e12;border:1p
 /* --- customer data ops (the modals call these, so the gate drives the same code path) --- */
 function createCust(data){
   const c=Object.assign({id:db.seqC++,name:"",phone:"",email:"",street:"",city:"Toronto",lat:null,lng:null,
-    stage:"new",source:"Manual",tags:[],notes:"",createdAt:Date.now(),ownerId:(activeUsers()[0]||db.users[0]||{}).id||1,followup:""},
+    stage:"new",source:"Door-to-door",tags:[],notes:"",createdAt:Date.now(),ownerId:(activeUsers()[0]||db.users[0]||{}).id||1,followup:""},
     data,{log:[{t:Date.now(),m:"Lead created."}]});
   db.customers.push(c);save();return c;
 }
@@ -1957,7 +1959,10 @@ function custMatches(c,q){q=q.toLowerCase();
 function leadRows(){
   const st=LS();
   let list=db.customers.slice();
-  if(st.filter!=="all")list=list.filter(c=>c.stage===st.filter);
+  // Leads = the pipeline: interested, no confirmed booking. A Won client is NOT a lead — they
+  // live on the Clients screen. "All" on the Leads screen means all PIPELINE stages.
+  if(st.filter==="all"&&listScreen==="leads")list=list.filter(c=>c.stage!=="won");
+  else if(st.filter!=="all")list=list.filter(c=>c.stage===st.filter);
   if(st.q)list=list.filter(c=>custMatches(c,st.q));
   const cmp={
     "new":(a,b)=>(b.createdAt||0)-(a.createdAt||0)||a.name.localeCompare(b.name),
@@ -2156,7 +2161,11 @@ function custForm(c){
       '<div class="field"><label>Stage</label><select id="ce-stage">'+
         STAGES.map(s=>'<option value="'+s.id+'"'+(c&&c.stage===s.id?" selected":"")+'>'+esc(s.label)+'</option>').join("")+
       '</select></div>'+
-      '<div class="field"><label>Source</label><input id="ce-source" value="'+esc(c?(c.source||""):"Manual")+'" placeholder="Door knock"></div>'+
+      '<div class="field"><label>Source</label><select id="ce-source">'+
+        (()=>{const cur=c?(c.source||"Door-to-door"):"Door-to-door";
+          const list=LEAD_SOURCES.slice();if(cur&&!list.includes(cur))list.push(cur); // legacy values stay selectable
+          return list.map(s=>'<option value="'+esc(s)+'"'+(s===cur?" selected":"")+'>'+esc(s)+'</option>').join("");})()+
+      '</select></div>'+
       '<div class="field"><label>Rep</label><select id="ce-rep">'+
         userOptList(c?c.ownerId:null).map(u=>'<option value="'+u.id+'"'+(c&&c.ownerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("")+
       '</select></div>'+
