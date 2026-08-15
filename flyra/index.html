@@ -388,6 +388,8 @@
   .chart-tip.show{opacity:1;transform:translateY(0)}
   .chart-tip .tl{color:var(--muted);font-weight:700;font-size:11.5px;letter-spacing:.02em}
   .chart-tip .tv{color:var(--green);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .donut-ring circle{transition:stroke-width .12s ease,opacity .12s ease;pointer-events:stroke;cursor:pointer}
+  .dleg{transition:background .12s ease;cursor:pointer}
 
   /* ---------- Phone / PWA ---------- */
   @media(max-width:860px){
@@ -618,12 +620,15 @@ function heroChartSVG(data,height){
   return svgWrap(g,baseline+marks+labels+cols,defs);
 }
 /* Hover tooltip shared by every chart. Re-bound after each render that draws one. */
+/* Shared by every .chart-tip user (line-chart columns + donut segments/legend below) — keeps the
+   card on-screen by flipping to the left of the cursor near the right edge. */
+function posTip(tip,e){const w=innerWidth,x=e.clientX;
+  tip.style.left=(x>w-160?x-14-tip.offsetWidth:x+14)+"px";tip.style.top=(e.clientY-12)+"px";}
 function bindChartTips(){
   const tip=$("#chart-tip"); if(!tip)return;
   document.querySelectorAll(".acol").forEach(el=>{
     el.addEventListener("mouseenter",()=>{tip.innerHTML='<div class="tl">'+esc(el.dataset.lbl||"")+'</div><div class="tv">'+esc(el.dataset.val||"")+'</div>';tip.classList.add("show");});
-    el.addEventListener("mousemove",e=>{const w=innerWidth,x=e.clientX;
-      tip.style.left=(x>w-160?x-14-tip.offsetWidth:x+14)+"px";tip.style.top=(e.clientY-12)+"px";});
+    el.addEventListener("mousemove",e=>posTip(tip,e));
     el.addEventListener("mouseleave",()=>tip.classList.remove("show"));
   });
 }
@@ -3112,37 +3117,91 @@ function buildDonut(pairs){
   return {slices,total};
 }
 /* Ring built from stacked dasharray circles — a 2px gap between every slice via the "gap" side of
-   each segment's dasharray. Text stays --ink/--muted, never a series color. */
-function donutSVG(built,size,centerN){
+   each segment's dasharray. Text stays --ink/--muted, never a series color.
+   Each segment carries data-di="<index>" (scoped to this panel's #donut-<pid> wrapper — see
+   donutPanel/wireDonutHover) so hover can grow it, dim its siblings, and swap the center readout. */
+function donutSVG(built,size,centerN,pid){
   size=size||168;const cx=size/2,cy=size/2,r=size/2-18,sw=22,C=2*Math.PI*r;
   let off=0,arcs="";
-  built.slices.forEach(s=>{
+  built.slices.forEach((s,i)=>{
     const frac=built.total>0?s.value/built.total:0,len=Math.max(0,frac*C-2);
-    arcs+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+s.color+'" stroke-width="'+sw+
+    arcs+='<circle class="dseg" data-di="'+i+'" cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+s.color+'" stroke-width="'+sw+
       '" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+
       '" transform="rotate(-90 '+cx+' '+cy+')"/>';
     off+=frac*C;
   });
   const n=centerN!=null?centerN:Math.round(built.total);
-  const center='<text x="'+cx+'" y="'+(cy-3)+'" text-anchor="middle" font-size="9.5" font-weight="800" letter-spacing="1" fill="#9aa1ab">TOTAL</text>'+
-    '<text x="'+cx+'" y="'+(cy+17)+'" text-anchor="middle" font-size="19" font-weight="800" fill="#f5f6f8">'+n+'</text>';
-  return '<svg viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'" style="flex-shrink:0">'+arcs+center+'</svg>';
+  const center='<text id="dctr-l-'+esc(pid)+'" x="'+cx+'" y="'+(cy-14)+'" text-anchor="middle" font-size="9.5" font-weight="800" letter-spacing="1" fill="#9aa1ab">TOTAL</text>'+
+    '<text id="dctr-v-'+esc(pid)+'" x="'+cx+'" y="'+(cy+9)+'" text-anchor="middle" font-size="19" font-weight="800" fill="#f5f6f8">'+n+'</text>'+
+    '<text id="dctr-p-'+esc(pid)+'" x="'+cx+'" y="'+(cy+25)+'" text-anchor="middle" font-size="10.5" font-weight="700" fill="#6b7280"></text>';
+  return '<svg viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'" style="flex-shrink:0"><g class="donut-ring">'+arcs+'</g>'+center+'</svg>';
 }
+/* Legend rows carry data-dl="<index>" (same index as the matching segment's data-di) plus the
+   label/value/pct baked into data-* attrs, so wireDonutHover can read them without a second copy
+   of `built` at wiring time — the DOM the panel already rendered is the source of truth. */
 function donutLegend(built){
   if(!built.slices.length)return '<div class="es" style="font-style:italic;color:var(--faint)">Nothing in range.</div>';
-  return built.slices.map(s=>
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0">'+
+  return built.slices.map((s,i)=>
+    '<div class="dleg" data-dl="'+i+'" data-dlabel="'+esc(s.label)+'" data-dval="'+s.value+'" data-dpct="'+Math.round(s.pct)+'" '+
+      'style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 6px;margin:0 -6px;border-radius:8px">'+
       '<span style="width:10px;height:10px;border-radius:50%;background:'+s.color+';flex-shrink:0"></span>'+
       '<span style="flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.label)+'</span>'+
       '<span style="color:var(--muted)">'+s.value+'</span>'+
       '<span style="color:var(--faint);min-width:40px;text-align:right">'+Math.round(s.pct)+'%</span>'+
     '</div>').join("");
 }
-function donutPanel(title,built,centerN){
-  return '<div class="panel"><h2>'+esc(title)+'</h2><div class="panel-pad" style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'+
-    donutSVG(built,168,centerN)+
+/* pid: short unique id per donut on a screen (Jobs has two — "jobs-src"/"jobs-svc" — so their
+   hover wiring can't cross-talk). Wraps SVG+legend in #donut-<pid>, the scope wireDonutHover
+   queries within. */
+function donutPanel(title,built,centerN,pid){
+  return '<div class="panel"><h2>'+esc(title)+'</h2><div class="panel-pad" id="donut-'+esc(pid)+'" style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'+
+    donutSVG(built,168,centerN,pid)+
     '<div style="flex:1;min-width:180px">'+donutLegend(built)+'</div>'+
   '</div></div>';
+}
+function truncLbl(s){s=String(s||"");return s.length>13?s.slice(0,12)+"…":s;}
+/* Hover wiring for one donut: segment<->legend are matched by index within #donut-<pid>, so two
+   donuts on the same screen (Jobs) never highlight each other's slices. mouseenter grows the
+   segment (stroke-width 22->28) and dims the rest, swaps the center TOTAL/count for the slice's
+   label/value/pct, and shows #chart-tip; mouseleave reverts all of it. Legend rows drive the same
+   effect and get a background wash. Null-guarded like bindChartTips — the stub returns [] from
+   querySelectorAll and a fake el from $, so this is a no-op under the test harness. */
+function wireDonutHover(pid){
+  const box=$("#donut-"+pid); if(!box)return;
+  const segs=box.querySelectorAll("[data-di]");
+  const legend=box.querySelectorAll("[data-dl]");
+  const tip=$("#chart-tip");
+  const lblEl=$("#dctr-l-"+pid),valEl=$("#dctr-v-"+pid),pctEl=$("#dctr-p-"+pid);
+  const defTotal=valEl?valEl.textContent:"";
+  const rows={}; legend.forEach(el=>{rows[el.dataset.dl]=el;});
+  function show(i,e){
+    const row=rows[i]; if(!row)return;
+    segs.forEach(el=>{const on=el.dataset.di===i;el.style.strokeWidth=on?"28":"22";el.style.opacity=on?"1":".5";});
+    legend.forEach(el=>{el.style.background=el.dataset.dl===i?"rgba(255,255,255,.06)":"";});
+    if(lblEl)lblEl.textContent=truncLbl(row.dataset.dlabel);
+    if(valEl)valEl.textContent=row.dataset.dval;
+    if(pctEl)pctEl.textContent=row.dataset.dpct+"%";
+    if(tip){tip.innerHTML='<div class="tl">'+esc(row.dataset.dlabel)+'</div><div class="tv">'+row.dataset.dpct+'%</div>';
+      tip.classList.add("show"); if(e)posTip(tip,e);}
+  }
+  function reset(){
+    segs.forEach(el=>{el.style.strokeWidth="22";el.style.opacity="1";});
+    legend.forEach(el=>{el.style.background="";});
+    if(lblEl)lblEl.textContent="TOTAL";
+    if(valEl)valEl.textContent=defTotal;
+    if(pctEl)pctEl.textContent="";
+    if(tip)tip.classList.remove("show");
+  }
+  segs.forEach(el=>{
+    el.addEventListener("mouseenter",e=>show(el.dataset.di,e));
+    el.addEventListener("mousemove",e=>tip&&posTip(tip,e));
+    el.addEventListener("mouseleave",reset);
+  });
+  legend.forEach(el=>{
+    el.addEventListener("mouseenter",e=>show(el.dataset.dl,e));
+    el.addEventListener("mousemove",e=>tip&&posTip(tip,e));
+    el.addEventListener("mouseleave",reset);
+  });
 }
 function statTile(color,icon,label,num,meta){
   return '<div class="stat"><div class="ic '+color+'">'+icon+'</div>'+
@@ -3243,8 +3302,8 @@ function renderReportsJobs(){
       statTile("cyan","🏦","Collected revenue",money(stats.collected),Math.round(stats.collectedPct)+"% of expected")+
       statTile("purple","📊","Average job value",money2(stats.avgJobValue),"")+
     '</div>'+
-    donutPanel("Jobs by lead source",buildDonut(toPairs(bySource)))+
-    donutPanel("Jobs by service",buildDonut(toPairs(byService)))+
+    donutPanel("Jobs by lead source",buildDonut(toPairs(bySource)),null,"jobs-src")+
+    donutPanel("Jobs by service",buildDonut(toPairs(byService)),null,"jobs-svc")+
     jobsTablePanel(jobs);
 }
 /* The sortable jobs table under the donuts (real-Flyra style). Tap a header to sort; tap the
@@ -3316,7 +3375,7 @@ function renderReportsPlans(){
       statTile("amber","✍️","Signed rate",Math.round(stats.signedRate)+"%","")+
       statTile("purple","💰","Plan revenue /yr",money(stats.planRevenueYr),"")+
     '</div>'+
-    donutPanel("By frequency",byFreq,activeN)+
+    donutPanel("By frequency",byFreq,activeN,"plans-freq")+
     '<div class="panel"><h2>Recurring revenue<span class="pill">last 12</span></h2><div class="panel-pad">'+
       (series.some(m=>m.value>0)?reportAreaSVG(series,200)
         :'<div class="empty" style="padding:28px"><div class="big">📊</div>No plan-linked revenue yet.</div>')+
@@ -3377,6 +3436,8 @@ function renderReports(){
   });
   if(reportTab==="plans")document.querySelectorAll("[data-repplan]").forEach(el=>el.onclick=()=>openPlan(+el.dataset.repplan));
   if(reportTab==="overview")document.querySelectorAll("[data-leakview]").forEach(el=>el.onclick=()=>setView(el.dataset.leakview));
+  if(reportTab==="jobs"){wireDonutHover("jobs-src");wireDonutHover("jobs-svc");}
+  if(reportTab==="plans")wireDonutHover("plans-freq");
   bindChartTips();
 }
 
