@@ -1305,6 +1305,16 @@ function completeJobFlow(id){
   if(j.planId)ensurePlanJobs(); // a plan visit is done — queue its next one
   return j;
 }
+/* Fat-finger insurance: put a done job back on the schedule. Collected money is zeroed (it was
+   never real if the Done was accidental) — the old amount is kept in the customer's log. */
+function uncompleteJob(id){
+  const j=db.jobs.find(x=>x.id===id);if(!j||j.status!=="done")return null;
+  const had=+j.collected||0;
+  j.status="scheduled";j.completedAt=0;j.collected=0;j.payMethod="";
+  const c=custById(j.customerId);
+  if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Back to scheduled — Done undone"+(had?" (had $"+had.toFixed(2)+" collected, now cleared)":"")});}
+  save();return j;
+}
 
 /* --- rendering --- */
 function schedHeader(){
@@ -1476,6 +1486,7 @@ function jobFoot(j){
     (showConfirm?'<button class="btn sm" id="jf-confirm">'+(j.termsAcceptedAt?"✓ Confirmed":"📋 Confirm")+'</button>':'')+
     '<span class="spacer"></span>'+
     (j&&j.status!=="done"?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
+    (j&&j.status==="done"?'<button class="btn sm" id="jf-undone">↩ Not done</button>':'')+
     '<button class="btn btn-primary" id="jf-save">Save</button>';
 }
 function saveJobBtn(){
@@ -1570,6 +1581,12 @@ function openJob(id,preset){
   const done=$("#jf-done");if(done)done.onclick=()=>{
     completeJobFlow(editJob);closeModal("job-overlay");render();
     toast("Job marked done","ok");
+  };
+  const undone=$("#jf-undone");if(undone)undone.onclick=()=>{
+    const jj=db.jobs.find(x=>x.id===editJob);
+    if(jj&&(+jj.collected||0)>0&&!confirm("This job shows "+money(jj.collected)+" collected — undoing clears that. Sure?"))return;
+    uncompleteJob(editJob);closeModal("job-overlay");render();
+    toast("Back on the schedule","ok");
   };
   const conf=$("#jf-confirm");if(conf)conf.onclick=()=>openBookingConfirm(editJob);
   openModal("job-overlay");
