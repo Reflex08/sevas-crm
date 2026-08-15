@@ -1689,19 +1689,33 @@ function applySlotServices(customerId,date,time,entries){
 }
 /* One row per db.settings.services entry, plus a trailing row for any job in the slot whose
    service isn't in settings anymore (legacy — still editable, not silently hidden). */
+/* Same visual language as the job form: a Services field of checkbox rows, price inline.
+   No per-service status or Done — the VISIT is the unit the homeowner pays for. */
 function slotRow(name,job,defaultPrice){
   const price=job?job.price:defaultPrice;
-  const chip=job?'<span class="badge b-'+(job.status==="done"?"done":"scheduled")+'">'+(job.status==="done"?"✓ done":"booked")+'</span>':"";
-  const doneBtn=(job&&job.status==="scheduled")?'<button class="btn sm" data-slotdone="'+job.id+'">✓ Done</button>':"";
-  return '<div class="jobline" style="cursor:default" data-svc="'+esc(name)+'">'+
+  return '<div class="jobline" style="cursor:default;padding:8px 0" data-svc="'+esc(name)+'">'+
     '<label class="crew-chk" style="flex:1;min-width:0">'+
       '<input type="checkbox" class="slot-chk"'+(job?" checked":"")+'>'+
       '<span class="nm">'+esc(name)+'</span>'+
     '</label>'+
     '<div class="field pre" style="margin:0;flex:0 0 96px"><span class="sym">$</span>'+
       '<input class="slot-price" type="number" min="0" step="1" value="'+(+price||0)+'"></div>'+
-    chip+doneBtn+
   '</div>';
+}
+/* One Done for the whole visit: every scheduled job in the slot flips together, ONE collected
+   question for the combined total, and each job books its own price share so per-service money
+   and commissions stay exact underneath. */
+function completeSlot(customerId,date,time){
+  const jobs=db.jobs.filter(j=>j.customerId===customerId&&j.date===date&&(j.time||"")===(time||"")&&j.status==="scheduled");
+  if(!jobs.length)return null;
+  const total=jobs.reduce((s,j)=>s+(+j.price||0),0);
+  const paid=total>0&&confirm("Collected "+money(total)+" for "+jobs.map(j=>j.service).join(" + ")+"?");
+  jobs.forEach(j=>{j.status="done";if(!j.completedAt)j.completedAt=Date.now();j.collected=paid?(+j.price||0):0;});
+  const c=custById(customerId);
+  if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+jobs.map(j=>j.service).join(" + ")+" — "+(paid?"collected "+money(total):"unpaid")});}
+  save();
+  if(jobs.some(j=>j.planId))ensurePlanJobs();
+  return jobs;
 }
 function slotBody(customerId,date,time){
   const jobs=db.jobs.filter(j=>j.customerId===customerId&&j.date===date&&(j.time||"")===(time||"")&&j.status!=="cancelled");
@@ -1711,15 +1725,7 @@ function slotBody(customerId,date,time){
     .join("");
   return rows||'<div class="panel-pad empty">No services configured.</div>';
 }
-function bindSlotBody(customerId,date,time){
-  document.querySelectorAll("#slot-body [data-slotdone]").forEach(b=>b.onclick=()=>{
-    completeJobFlow(+b.dataset.slotdone);
-    render(); // keeps the schedule/dashboard behind the modal in sync
-    $("#slot-body").innerHTML=slotBody(customerId,date,time);
-    bindSlotBody(customerId,date,time);
-  });
-}
-function saveSlotBtn(){
+function saveSlotBtn(quiet){
   if(!editSlot)return;
   const entries=[];
   document.querySelectorAll("#slot-body [data-svc]").forEach(row=>{
@@ -1727,6 +1733,7 @@ function saveSlotBtn(){
       price:+row.querySelector(".slot-price").value||0});
   });
   const r=applySlotServices(editSlot.customerId,editSlot.date,editSlot.time,entries);
+  if(quiet)return; // ✓ Done calls this first, then completes the visit and closes itself
   closeModal("slot-overlay");render();
   toast(r.blocked.length?r.blocked.length+" done job"+(r.blocked.length===1?"":"s")+" kept — mark not-done first to remove":"Saved",
     r.blocked.length?"err":"ok");
@@ -1734,12 +1741,21 @@ function saveSlotBtn(){
 function openSlotEditor(customerId,date,time){
   editSlot={customerId,date,time};
   const c=custById(customerId);
+  const slotJobs=db.jobs.filter(j=>j.customerId===customerId&&j.date===date&&(j.time||"")===(time||"")&&j.status!=="cancelled");
+  const open=slotJobs.filter(j=>j.status==="scheduled");
+  const allDone=slotJobs.length&&!open.length;
   $("#slot-title").textContent=c?c.name:"(deleted customer)";
-  $("#slot-hsub").textContent=fmtDate(date)+(time?" · "+fmtTime(time):"");
-  $("#slot-body").innerHTML=slotBody(customerId,date,time);
-  $("#slot-foot").innerHTML='<button class="btn btn-primary" id="slot-save">Save</button>';
-  bindSlotBody(customerId,date,time);
-  $("#slot-save").onclick=saveSlotBtn;
+  $("#slot-hsub").textContent=fmtDate(date)+(time?" · "+fmtTime(time):"")+(allDone?" · ✓ done":"");
+  $("#slot-body").innerHTML='<div class="field"><label>Services</label>'+slotBody(customerId,date,time)+'</div>';
+  $("#slot-foot").innerHTML='<span class="spacer"></span>'+
+    (open.length?'<button class="btn btn-green" id="slot-done">✓ Done</button>':'')+
+    '<button class="btn btn-primary" id="slot-save">Save</button>';
+  const sd=$("#slot-done");if(sd)sd.onclick=()=>{
+    saveSlotBtn(true); // prices/services as edited, then complete the visit in one shot
+    completeSlot(customerId,date,time);
+    closeModal("slot-overlay");render();toast("Job marked done","ok");
+  };
+  $("#slot-save").onclick=()=>saveSlotBtn();
   openModal("slot-overlay");
 }
 
