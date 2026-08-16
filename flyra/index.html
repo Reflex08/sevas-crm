@@ -1760,8 +1760,12 @@ function openJob(id,preset){
   // Slot mode gets a small combined-total hint next to the customer name — subtle, not a redesign.
   // The ✎ chip opens the full client editor right from the job (cust-overlay gets a temporary
   // z-index bump so it stacks ABOVE this modal; closeModal resets it).
+  // Address line under the name: tap → Waze opens and starts navigating there (best route).
+  const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
   $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
-    (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"");
+    (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"")+
+    (addr?'<div style="margin-top:5px"><a href="https://waze.com/ul?q='+encodeURIComponent(addr)+'&navigate=yes" target="_blank" rel="noopener" '+
+      'style="color:var(--brand);font-weight:600;text-decoration:none">📍 '+esc(addr)+'</a></div>':"");
   const ecBtn=$("#jf-editcust");
   if(ecBtn)ecBtn.onclick=()=>{
     const ov=$("#cust-overlay");if(ov&&ov.style)ov.style.zIndex="65";
