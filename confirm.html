@@ -111,12 +111,19 @@ function parseData(){
     x:typeof d.x==="string"?d.x:"",svcs:svcs
   };
 }
+var DEFAULT_TERMS="1. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
+  "2. Best effort — our technician will do his best on every pane, but results depend on the condition of the glass. Hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, and perfect results cannot be guaranteed.\n"+
+  "3. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
+  "4. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
+  "5. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
+  "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
+  "Confirming this booking means you've read and agree to these terms.";
 function render(){
   var d=parseData();
   if(!d){renderError();return;}
   var longDate=fmtLongDate(d.dt);
   var timeStr=fmtTime12(d.t);
-  var termsText=(d.x||"").replace(/\{fee\}/g,d.f);
+  var termsText=(d.x||DEFAULT_TERMS).replace(/\{fee\}/g,d.f);
   var phoneFmt=fmtPhoneDigits(d.ph);
   var app=document.getElementById("app");
   app.innerHTML=

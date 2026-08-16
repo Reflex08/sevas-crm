@@ -2622,9 +2622,13 @@ function confirmLink(id){
   const sibs=slotSiblings(j);
   const svcs=sibs.map(x=>({s:x.service,p:+x.price||0}));
   const total=svcs.reduce((s,x)=>s+x.p,0);
+  // Terms are NOT in the link — confirm.html carries the standard text itself and fills {fee}.
+  // Keeps the link short enough to survive any SMS app. (x stays supported page-side for the
+  // day the owner writes custom terms: only sent when it differs from the app default.)
   const payload={b:biz.name||"",ph:bizPhone,n:firstName(c?c.name:""),
     s:sibs.map(x=>x.service).join(" + "),dt:j.date,
-    t:j.time||"",p:total,f:+t.cancelFeePct||0,x:t.text||""};
+    t:j.time||"",p:total,f:+t.cancelFeePct||0};
+  if((t.text||"")!==DEFAULT_SETTINGS().terms.text)payload.x=t.text||"";
   if(svcs.length>1)payload.svcs=svcs;
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
     .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
