@@ -154,6 +154,21 @@ function render(){
         '<div class="headline">Confirmed &mdash; thank you!</div>'+
         '<div class="note">A confirmation text is opening &mdash; please press send, it&#39;s your receipt.</div>'+
       '</div>';
+    // Automatic written proof of agreement, emailed to the business the moment they agree —
+    // like a website quote form. Fire-and-forget; the SMS receipt below is the backup.
+    try{
+      fetch("https://formsubmit.co/ajax/info@sevasservices.com",{method:"POST",
+        headers:{"Content-Type":"application/json","Accept":"application/json"},
+        body:JSON.stringify({
+          _subject:"Booking CONFIRMED — "+d.n+" ("+d.s+", "+longDate+")",
+          _template:"table",
+          client:d.n,service:d.s,date:longDate,time:timeStr||"anytime",
+          price:fmtMoney(d.p),cancellation_fee:d.f+"%",
+          agreed:"Yes — accepted the terms and conditions",
+          agreed_at:new Date().toString(),
+          terms_shown:termsText
+        })}).catch(function(){});
+    }catch(e){}
     var msg="CONFIRMED ✓ — "+d.n+", "+d.s+" on "+longDate+(timeStr?", "+timeStr:"")+
       ". I agree to the terms including the "+d.f+"% cancellation fee.";
     if(d.ph)location.href="sms:+"+d.ph+"?&body="+encodeURIComponent(msg);
