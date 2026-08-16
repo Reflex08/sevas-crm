@@ -686,8 +686,13 @@ const DEFAULT_SETTINGS=()=>({
   smsNumber:"",  // Flyra's "custom number" — a label here, nothing dials it locally
   ownerPin:"",   // "" = off. Deterrent on the owner/manager tile in the who-picker, not security.
   tier:"business",
-  terms:{cancelFeePct:20,text:"Free rescheduling up to 24h before the visit. Cancellations within "+
-    "24h incur a {fee}% fee. Work is weather-dependent; we'll confirm the morning of."},
+  terms:{cancelFeePct:20,text:"1. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
+    "2. Best effort — our technician will do his best on every pane, but results depend on the condition of the glass. Hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, and perfect results cannot be guaranteed.\n"+
+    "3. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
+    "4. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
+    "5. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
+    "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
+    "Confirming this booking means you've read and agree to these terms."},
   referral:{theyGet:25,youGet:50,giftCard:0,sendWhen:"done",
     template:"Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}"},
 });
@@ -1646,31 +1651,26 @@ function jobForm(j,preset){
     '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
 }
 function jobFoot(j){
-  const showConfirm=j&&j.status==="scheduled"; // confirm-booking link always targets the first job of a slot
+  // NEW job: one primary action, nothing else — no half-typed ghost client, so no autosave either.
+  if(!j)return '<button class="btn btn-primary" id="jf-save">Book</button>';
+  // EXISTING job: exactly two buttons. Every field autosaves on change (autoSaveJob), so Save/Confirm
+  // don't live here any more — Confirm moved to the header chip row (see openJob), Save is gone outright.
   // Slot mode (2+ jobs in the visit): Done/Not-done reflect the WHOLE visit, not just the first job.
-  const siblings=j?slotSiblings(j):[];
-  const allDone=siblings.length>1?siblings.every(x=>x.status==="done"):(j&&j.status==="done");
-  return (j&&!isRep()?'<button class="btn del" id="jf-delete">Delete</button>':'')+ // reps never delete money records
-    (showConfirm?'<button class="btn sm" id="jf-confirm">'+(j.termsAcceptedAt?"✓ Confirmed":"📋 Confirm")+'</button>':'')+
+  const siblings=slotSiblings(j);
+  const allDone=siblings.length>1?siblings.every(x=>x.status==="done"):j.status==="done";
+  return (!isRep()?'<button class="btn del" id="jf-delete">Delete</button>':'')+ // reps never delete money records
     '<span class="spacer"></span>'+
-    (j&&!allDone?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
-    (j&&allDone?'<button class="btn sm" id="jf-undone">↩ Not done</button>':'')+
-    '<button class="btn btn-primary" id="jf-save">Save</button>';
+    (!allDone?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
+    (allDone?'<button class="btn sm" id="jf-undone">↩ Not done</button>':'');
 }
+/* NEW job only (editJob is always null here — the Book button doesn't render otherwise).
+   Existing jobs never reach this: every edit persists live through autoSaveJob below. */
 function saveJobBtn(){
   if(isRep()){
     const service=$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:"");
     const price=+$("#jf-price").value||0;
     const date=$("#jf-date").value||today();
     const notes=($("#jf-notes").value||"").trim();
-    if(editJob){
-      // Rep editing: only service/price/date/notes change. Who's assigned, who gets the
-      // credit, and the time slot are never read from this form, so updateJob's merge
-      // leaves all of that exactly as it was — a rep can't reassign a job's credit.
-      updateJob(editJob,{service,price,date,notes});
-      closeModal("job-overlay");render();toast("Job saved","ok");
-      return;
-    }
     const me=whoUser(); // isRep() is true, so a user is guaranteed to be logged in
     const presetCid=+(($("#jf-cid")||{}).value||0);
     let c=presetCid?custById(presetCid):null;
@@ -1691,8 +1691,49 @@ function saveJobBtn(){
   }
   const cid=+$("#jf-cust").value||null;
   if(!cid){toast("Pick a customer for this job","err");return;}
-  const curJob=editJob?db.jobs.find(x=>x.id===editJob):null;
-  const siblings=curJob?slotSiblings(curJob):[];
+  const data={
+    customerId:cid,
+    service:$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:""),
+    price:+$("#jf-price").value||0,
+    date:$("#jf-date").value||today(),
+    time:$("#jf-time").value||"",
+    durMin:+$("#jf-dur").value||60,
+    notes:($("#jf-notes").value||"").trim(),
+    crewIds:[], // crew field removed from the form
+  };
+  const closerVal=$("#jf-closer").value;
+  const closerId=closerVal?+closerVal:null;
+  data.closerId=closerId;
+  data.commissionPct=closerId?userRate(closerId):0; // a brand-new job has no history to preserve
+  createJob(data);
+  closeModal("job-overlay");render();toast("Job saved","ok");
+}
+/* Persists the job currently open in the modal (editJob set) straight from whatever's in the
+   DOM right now — fires on every tracked field's change event (delegated listener below), on
+   the slot ✕-remove / ＋Add-service actions, and once more as a close-time flush (closeModal).
+   No closeModal call here, at most a single debounced "Saved" toast per modal open (autoSaveToast).
+   Same three code paths Save used to run: rep subset / solo updateJob / slot shared-fields +
+   applySlotServices — saveJobBtn above now only ever creates. */
+let autoSaveToasted=false;
+function autoSaveToast(){if(autoSaveToasted)return;autoSaveToasted=true;toast("Saved","ok");}
+function autoSaveJob(){
+  if(!editJob)return; // no half-typed ghost client — new jobs only ever persist via Book
+  if(isRep()){
+    // Rep editing: only service/price/date/notes change. Who's assigned, who gets the
+    // credit, and the time slot are never read from this form, so updateJob's merge
+    // leaves all of that exactly as it was — a rep can't reassign a job's credit.
+    const service=$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:"");
+    const price=+$("#jf-price").value||0;
+    const date=$("#jf-date").value||today();
+    const notes=($("#jf-notes").value||"").trim();
+    updateJob(editJob,{service,price,date,notes});
+    render();autoSaveToast();
+    return;
+  }
+  const cid=+$("#jf-cust").value||null;
+  if(!cid)return; // customer field cleared mid-edit — nothing sane to persist yet
+  const curJob=db.jobs.find(x=>x.id===editJob);if(!curJob)return;
+  const siblings=slotSiblings(curJob);
   if(siblings.length>1){
     // Slot mode: the form has no single service/price — shared fields apply to every job in
     // the visit, then applySlotServices reconciles the checkbox rows (create/update/delete).
@@ -1721,9 +1762,9 @@ function saveJobBtn(){
     // A sibling service whose row was ✕-removed from the list is an explicit off.
     siblings.forEach(sj=>{if(!entries.some(e=>e.service===sj.service))entries.push({service:sj.service,on:false,price:0});});
     const r=applySlotServices(cid,date,time,entries); // key is the NEW date/time — jobs already moved above
-    closeModal("job-overlay");render();
-    toast(r.blocked.length?r.blocked.length+" done job"+(r.blocked.length===1?"":"s")+" kept — mark not-done first to remove":"Job saved",
-      r.blocked.length?"err":"ok");
+    render();
+    if(r.blocked.length)toast(r.blocked.length+" done job"+(r.blocked.length===1?"":"s")+" kept — mark not-done first to remove","err");
+    else autoSaveToast();
     return;
   }
   const data={
@@ -1735,7 +1776,6 @@ function saveJobBtn(){
     durMin:+$("#jf-dur").value||60,
     notes:($("#jf-notes").value||"").trim(),
   };
-  if(!editJob)data.crewIds=[]; // crew field removed from the form; edits leave existing crewIds alone
   // A split job has no closer/commission select on the form (jobForm) — skip those fields
   // entirely so the merge in updateJob leaves j.splits (and its closerId/commissionPct) untouched.
   const isSplit=!!(curJob&&Array.isArray(curJob.splits)&&curJob.splits.length);
@@ -1747,15 +1787,19 @@ function saveJobBtn(){
     // historically stamped pct so one-off deals aren't silently rewritten on edit.
     data.commissionPct=closerId?((curJob&&curJob.closerId===closerId)?+curJob.commissionPct||0:userRate(closerId)):0;
   }
-  if(editJob)updateJob(editJob,data);else createJob(data);
-  closeModal("job-overlay");render();toast("Job saved","ok");
+  updateJob(editJob,data);
+  render();autoSaveToast();
 }
 function openJob(id,preset){
   editJob=id;
+  autoSaveToasted=false; // fresh modal open — the next autosave gets its one "Saved" toast
   const j=id?db.jobs.find(x=>x.id===id):null;
   const c=j?custById(j.customerId):((preset&&preset.customerId)?custById(preset.customerId):null);
   const siblings=j?slotSiblings(j):[];
   const isSlot=siblings.length>1;
+  // Confirm-booking link (📋) always targets the first job of a slot. Owner only, same gate
+  // as before relocating it out of the footer — reps never get to change a booking's terms.
+  const showConfirm=j&&j.status==="scheduled"&&!isRep();
   $("#job-title").textContent=j?"Edit job":"New job";
   // Slot mode gets a small combined-total hint next to the customer name — subtle, not a redesign.
   // The ✎ chip opens the full client editor right from the job (cust-overlay gets a temporary
@@ -1764,6 +1808,7 @@ function openJob(id,preset){
   const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
   $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
     (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"")+
+    (showConfirm?' <button class="btn sm" id="jf-confirm" style="margin-left:8px">'+(j.termsAcceptedAt?"✓ Confirmed":"📋 Confirm")+'</button>':"")+
     (addr?'<div style="margin-top:5px"><a href="https://waze.com/ul?q='+encodeURIComponent(addr)+'&navigate=yes" target="_blank" rel="noopener" '+
       'style="color:var(--brand);font-weight:600;text-decoration:none">📍 '+esc(addr)+'</a></div>':"");
   const ecBtn=$("#jf-editcust");
@@ -1788,7 +1833,7 @@ function openJob(id,preset){
   const svc=$("#jf-service"); // absent in slot mode — the Services field has no single service/price pair
   if(svc)svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
   bindSvcField(); // slot mode only — no-op when #jf-svcfield isn't in the form
-  $("#jf-save").onclick=saveJobBtn;
+  const sv=$("#jf-save");if(sv)sv.onclick=saveJobBtn; // only rendered for a NEW job (jobFoot)
   const del=$("#jf-delete");if(del)del.onclick=()=>{
     if(!editJob)return;
     // Re-read fresh from the db rather than trusting the closed-over `siblings` — nothing else
@@ -1823,9 +1868,18 @@ function openJob(id,preset){
     closeModal("job-overlay");render();
     toast("Back on the schedule","ok");
   };
-  const conf=$("#jf-confirm");if(conf)conf.onclick=()=>openBookingConfirm(editJob);
+  const conf=$("#jf-confirm");if(conf)conf.onclick=()=>sendConfirmLink(editJob); // client confirms, not the owner
   openModal("job-overlay");
 }
+// ONE delegated listener for every autosaving field, rather than wiring each one — fires on
+// blur/change, so an existing job's edits persist without a Save button. New jobs (editJob
+// null) fall through untouched; the ✕-remove/＋Add-service slot actions call autoSaveJob directly
+// (bindSvcField) since those are clicks, not change events.
+const AUTOSAVE_FIELDS=["jf-cust","jf-service","jf-price","jf-date","jf-time","jf-dur","jf-closer","jf-notes"];
+$("#job-body").addEventListener("change",e=>{
+  const t=e.target;if(!editJob||!t)return;
+  if((t.id&&AUTOSAVE_FIELDS.includes(t.id))||(t.classList&&t.classList.contains("slot-price")))autoSaveJob();
+});
 
 /* --- slot services (merged card, rendered inline inside the normal job modal) ---
    A merged card is display-only folding (groupSlotJobs) — the real jobs underneath still carry
@@ -1895,12 +1949,14 @@ function bindSvcField(){
     sel.insertAdjacentHTML("beforebegin",svcRow(sel.value,+o.dataset.price||0));
     o.remove();sel.value="";
     bindSvcField();
+    autoSaveJob(); // added service persists immediately, same as any other slot-mode edit
   };
   wrap.querySelectorAll("[data-rmsvc]").forEach(b=>b.onclick=()=>{
     const name=b.dataset.rmsvc,row=b.closest("[data-svc]");
     row.remove();
     const s=db.settings.services.find(x=>x.name===name);
     if(s&&sel)sel.insertAdjacentHTML("beforeend",'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'">'+esc(s.name)+'</option>');
+    autoSaveJob(); // removed service persists immediately
   });
 }
 /* One Done for the whole visit: every scheduled job in the slot flips together, ONE collected
@@ -2561,11 +2617,30 @@ function confirmLink(id){
   if(!bizPhone){toast("Add your business phone in Settings first","err");return null;}
   const c=custById(j.customerId);
   const t=db.settings.terms||{};
-  const payload={b:biz.name||"",ph:bizPhone,n:firstName(c?c.name:""),s:j.service,dt:j.date,
-    t:j.time||"",p:+j.price||0,f:+t.cancelFeePct||0,x:t.text||""};
+  // Multi-service visits confirm as ONE booking: every service itemized with its price, the
+  // headline price is the visit total ("Confirming your Window Cleaning $200 + Gutter $175").
+  const sibs=slotSiblings(j);
+  const svcs=sibs.map(x=>({s:x.service,p:+x.price||0}));
+  const total=svcs.reduce((s,x)=>s+x.p,0);
+  const payload={b:biz.name||"",ph:bizPhone,n:firstName(c?c.name:""),
+    s:sibs.map(x=>x.service).join(" + "),dt:j.date,
+    t:j.time||"",p:total,f:+t.cancelFeePct||0,x:t.text||""};
+  if(svcs.length>1)payload.svcs=svcs;
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
     .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   return "https://reflex08.github.io/sevas-crm/confirm.html?d="+b64;
+}
+/* The 📋 chip: the CLIENT confirms, not the owner — so the chip just texts them the link.
+   The old in-app Agree sheet is gone from the flow (openBookingConfirm remains for the record
+   view but no button routes there). */
+function sendConfirmLink(id){
+  const link=confirmLink(id);if(!link)return;
+  const j=db.jobs.find(x=>x.id===id),c=j?custById(j.customerId):null;
+  const ph=c?cleanNum(c.phone):"";
+  const body="Hi "+(c?firstName(c.name):"")+", please review and confirm your booking with "+
+    ((db.settings.business||{}).name||"us")+": "+link;
+  if(ph)location.href="sms:+"+ph+"?&body="+encodeURIComponent(body);
+  else prompt("No phone on file for "+(c?c.name:"this client")+" — copy the link:",link);
 }
 /* Hosted referral page: same base64url-JSON pattern as confirmLink, one field shorter. Unlike
    confirmLink this never refuses a missing business phone — referral.html falls back to a
@@ -3873,6 +3948,10 @@ function bindSyncCard(){
 const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay"];
 function openModal(id){const o=$("#"+id);if(o)o.classList.add("show");}
 function closeModal(id){
+  // Fields already autosave on change (blur fires it before a click on X/backdrop reaches here),
+  // but a keyboard-only close (Escape) can leave one last edit un-flushed — cheap and safe since
+  // autoSaveJob is idempotent, so just always flush an in-edit job modal on the way out.
+  if(id==="job-overlay"&&editJob)autoSaveJob();
   const o=$("#"+id);if(o)o.classList.remove("show");
   // Client editor opened from the job modal rides above it on a temporary z bump — undo it and
   // repaint the job modal so a renamed client shows immediately.

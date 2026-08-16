@@ -103,10 +103,12 @@ function parseData(){
   if(!d||typeof d!=="object")return null;
   if(!d.b||!d.ph||!d.n||!d.s||!d.dt||typeof d.p==="undefined")return null;
   if(!isFinite(+d.p))return null;
+  var svcs=Array.isArray(d.svcs)?d.svcs.filter(function(v){return v&&v.s&&isFinite(+v.p);})
+    .map(function(v){return {s:String(v.s),p:+v.p};}):[];
   return {
     b:String(d.b),ph:String(d.ph).replace(/[^\d+]/g,""),n:String(d.n),s:String(d.s),
     dt:String(d.dt),t:d.t?String(d.t):"",p:+d.p,f:isFinite(+d.f)?+d.f:0,
-    x:typeof d.x==="string"?d.x:""
+    x:typeof d.x==="string"?d.x:"",svcs:svcs
   };
 }
 function render(){
@@ -121,9 +123,13 @@ function render(){
     '<div class="word">'+esc(d.b)+'</div>'+
     '<div class="greet">Hi '+esc(d.n)+',</div>'+
     '<div class="card">'+
-      '<div class="svc">'+esc(d.s)+'</div>'+
+      (d.svcs.length>1
+        ?d.svcs.map(function(v){return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">'+
+            '<div class="svc" style="font-size:17px">'+esc(v.s)+'</div>'+
+            '<div style="font-weight:700;color:var(--muted)">'+esc(fmtMoney(v.p))+'</div></div>';}).join("")
+        :'<div class="svc">'+esc(d.s)+'</div>')+
       '<div class="when">'+esc(longDate)+(timeStr?' &middot; '+esc(timeStr):'')+'</div>'+
-      '<div class="price">'+esc(fmtMoney(d.p))+'</div>'+
+      '<div class="price">'+esc(fmtMoney(d.p))+(d.svcs.length>1?' <span style="font-size:14px;font-weight:600;color:var(--muted)">total</span>':'')+'</div>'+
       '<div class="tc-row"><input type="checkbox" id="tc-check" aria-label="Accept terms">'+
         '<div><div class="tc-main">I accept the terms and conditions</div>'+
         '<div class="tc-hint"><a id="tc-review">Tap to review</a></div></div></div>'+
