@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Service plan</title>
+<style>
+  :root{
+    color-scheme:dark;
+    --bg:#07080a; --panel:#121319; --line:rgba(255,255,255,.08);
+    --ink:#f5f6f8; --muted:#9aa1ab; --faint:#6b7280;
+    --sky:#7cc4fa; --on-sky:#06283d; --green:#34d399;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:440px;margin:0 auto;
+    padding:calc(env(safe-area-inset-top,0px) + 34px) 20px calc(env(safe-area-inset-bottom,0px) + 40px)}
+  .word{font-size:24px;font-weight:800;font-style:italic;letter-spacing:-.5px;text-align:center;margin-bottom:26px}
+  .greet{font-size:26px;font-weight:700;font-style:italic;letter-spacing:-.5px;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:22px}
+  .pn{font-size:19px;font-weight:800}
+  .sv{color:var(--muted);font-style:italic;font-size:14px;margin-top:2px}
+  .price{font-size:36px;font-weight:800;font-style:italic;letter-spacing:-.5px;margin-top:14px}
+  .per{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);font-weight:700}
+  .row{display:flex;justify-content:space-between;align-items:center;background:#0d0e12;border:1px solid var(--line);
+    border-radius:12px;padding:12px 15px;margin-top:10px;font-size:14px}
+  .row b{font-weight:700}
+  .sig{margin-top:20px}
+  .sig label{display:block;font-weight:700;font-size:12.5px;margin-bottom:5px}
+  .sig input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0d0e12;
+    color:var(--ink);font-size:16px;font-style:italic}
+  .tc-row{display:flex;align-items:flex-start;gap:11px;margin-top:16px}
+  .tc-row input{width:19px;height:19px;margin-top:1px;accent-color:var(--sky);flex-shrink:0}
+  .tc-main{font-size:13.5px;font-weight:600}
+  .cta:disabled{opacity:.45;cursor:default}
+  .cta{width:100%;margin-top:22px;border:0;border-radius:999px;background:var(--sky);color:var(--on-sky);
+    font-weight:800;font-size:16px;padding:16px;cursor:pointer;text-align:center}
+  .confirmed{margin-top:24px;text-align:center}
+  .confirmed .ck{width:52px;height:52px;border-radius:50%;background:rgba(52,211,153,.14);color:var(--green);
+    display:inline-flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:10px}
+  .confirmed .headline{font-weight:800;font-size:17px;color:var(--green)}
+  .confirmed .note{margin-top:6px;color:var(--muted);font-size:13px}
+  .call{display:block;text-align:center;margin-top:18px;color:var(--muted);font-size:13px;text-decoration:none}
+  .call a{color:var(--sky)}
+  .err-card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px;text-align:center;
+    color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+"use strict";
+function esc(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function fromBase64Url(str){
+  str=String(str||"").replace(/-/g,"+").replace(/_/g,"/");
+  while(str.length%4)str+="=";
+  return decodeURIComponent(escape(atob(str)));
+}
+function fmtMoney(p){
+  var n=+p;if(!isFinite(n))n=0;
+  return "$"+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtPhoneDigits(d){
+  d=String(d||"").replace(/[^\d]/g,"");
+  if(d.length===10)return "("+d.slice(0,3)+") "+d.slice(3,6)+"-"+d.slice(6);
+  if(d.length===11&&d[0]==="1")return "("+d.slice(1,4)+") "+d.slice(4,7)+"-"+d.slice(7);
+  return d;
+}
+function parseData(){
+  var qs=new URLSearchParams(location.search);
+  var raw=qs.get("d");
+  if(!raw)return null;
+  var d;
+  try{ d=JSON.parse(fromBase64Url(raw)); }catch(e){ return null; }
+  if(!d||typeof d!=="object")return null;
+  if(!d.b||!d.ph||!d.n||!isFinite(+d.pv)||!isFinite(+d.vy))return null;
+  return {b:String(d.b),ph:String(d.ph).replace(/[^\d+]/g,""),n:String(d.n),
+    pn:d.pn?String(d.pn):"Service plan",sv:d.sv?String(d.sv):"",
+    pv:+d.pv,vy:+d.vy,ip:isFinite(+d.ip)?+d.ip:0};
+}
+function render(){
+  var d=parseData();
+  if(!d){
+    document.getElementById("app").innerHTML=
+      '<div class="word">Service plan</div>'+
+      '<div class="err-card">This link is incomplete.<br>Please ask for a new link.</div>';
+    return;
+  }
+  var yearly=d.pv*d.vy;
+  var app=document.getElementById("app");
+  app.innerHTML=
+    '<div class="word">'+esc(d.b)+'</div>'+
+    '<div class="greet">Hi '+esc(d.n)+',</div>'+
+    '<div class="card">'+
+      '<div class="pn">'+esc(d.pn)+'</div>'+
+      (d.sv?'<div class="sv">'+esc(d.sv)+'</div>':'')+
+      '<div class="price">'+esc(fmtMoney(d.pv))+'</div>'+
+      '<div class="per">Per visit &middot; billed on service dates</div>'+
+      '<div class="row"><span>Visits per year</span><b>'+esc(String(d.vy))+'</b></div>'+
+      (d.ip?'<div class="row"><span>Initial visit (one-time)</span><b>'+esc(fmtMoney(d.ip))+'</b></div>':'')+
+      '<div class="row"><span>Value per year</span><b>'+esc(fmtMoney(yearly))+'</b></div>'+
+      '<div class="sig"><label>Type your full name to sign</label>'+
+        '<input id="sig-name" type="text" autocomplete="name" placeholder="Your full name"></div>'+
+      '<div class="tc-row"><input type="checkbox" id="pl-check" aria-label="Accept plan">'+
+        '<div class="tc-main">I want this plan — bill me per visit on service dates. I can cancel anytime before a visit.</div></div>'+
+    '</div>'+
+    '<div id="cta-area"><button class="cta" id="accept-btn" disabled>Accept plan</button></div>'+
+    (d.ph?'<div class="call">Questions? <a href="tel:+'+esc(d.ph)+'">'+esc(fmtPhoneDigits(d.ph))+'</a></div>':'');
+  var check=document.getElementById("pl-check");
+  var sig=document.getElementById("sig-name");
+  var btn=document.getElementById("accept-btn");
+  function gate(){btn.disabled=!(check.checked&&(sig.value||"").trim().length>1);}
+  check.onchange=gate; sig.oninput=gate;
+  btn.onclick=function(){
+    if(btn.disabled)return;
+    var signed=(sig.value||"").trim();
+    document.getElementById("cta-area").innerHTML=
+      '<div class="confirmed">'+
+        '<div class="ck">&#10003;</div>'+
+        '<div class="headline">Plan accepted &mdash; welcome aboard!</div>'+
+        '<div class="note">A confirmation text is opening &mdash; please press send, it&#39;s your receipt.</div>'+
+      '</div>';
+    // Automatic written proof to the business inbox (fire-and-forget; SMS receipt is the backup).
+    try{
+      fetch("https://formsubmit.co/ajax/info@sevasservices.com",{method:"POST",
+        headers:{"Content-Type":"application/json","Accept":"application/json"},
+        body:JSON.stringify({
+          _subject:"Plan ACCEPTED — "+d.n+" ("+d.pn+")",
+          _template:"table",
+          client:d.n,signed_name:signed,plan:d.pn,service:d.sv,
+          per_visit:fmtMoney(d.pv),visits_per_year:d.vy,
+          initial_visit:d.ip?fmtMoney(d.ip):"none",value_per_year:fmtMoney(yearly),
+          accepted_at:new Date().toString()
+        })}).catch(function(){});
+    }catch(e){}
+    var msg="PLAN ACCEPTED ✓ — "+signed+" accepts the "+d.pn+" ("+fmtMoney(d.pv)+"/visit, "+
+      d.vy+" visits/yr"+(d.ip?", "+fmtMoney(d.ip)+" initial":"")+").";
+    if(d.ph)location.href="sms:+"+d.ph+"?&body="+encodeURIComponent(msg);
+  };
+}
+render();
+</script>
+</body>
+</html>

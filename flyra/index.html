@@ -2558,9 +2558,34 @@ function openPlanEdit(id){
 }
 
 /* --- proposal sheet + accept & sign --- */
+/* Remote plan acceptance: same hosted-page pattern as confirmLink. The client opens the link,
+   types their name to sign, accepts — the proof comes back by email + text. First name only in
+   the public link, never the full name/address. */
+function planLink(id){
+  const p=db.plans.find(x=>x.id===id);if(!p)return null;
+  const biz=db.settings.business||{};
+  const bizPhone=cleanNum(biz.phone);
+  if(!bizPhone){toast("Add your business phone in Settings first","err");return null;}
+  const c=custById(p.customerId);
+  const payload={b:biz.name||"",ph:bizPhone,n:firstName(c?c.name:""),pn:p.name||"",sv:p.service||"",
+    pv:+p.perVisit||0,vy:+p.visitsPerYear||0,ip:+p.initialPrice||0};
+  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  return "https://reflex08.github.io/sevas-crm/plan.html?d="+b64;
+}
+function sendPlanLink(id){
+  const link=planLink(id);if(!link)return;
+  const p=db.plans.find(x=>x.id===id),c=p?custById(p.customerId):null;
+  const ph=c?cleanNum(c.phone):"";
+  const body="Hi "+(c?firstName(c.name):"")+", here's your "+(p?p.name:"service")+" plan with "+
+    ((db.settings.business||{}).name||"us")+" — review and accept here: "+link;
+  if(ph)location.href="sms:+"+ph+"?&body="+encodeURIComponent(body);
+  else prompt("No phone on file for "+(c?c.name:"this client")+" — copy the link:",link);
+}
 function planFoot(p){
   if(p.status==="proposed")
-    return '<button class="btn btn-primary" id="pv-accept" style="width:100%;justify-content:center;padding:14px;font-size:15px">Accept &amp; Sign</button>';
+    return '<button class="btn btn-primary" id="pv-sendlink" style="width:100%;justify-content:center;padding:14px;font-size:15px">📩 Send accept link</button>'+
+      '<button class="btn btn-ghost" id="pv-accept" style="width:100%;justify-content:center;margin-top:10px">Accept &amp; Sign in person</button>';
   if(p.status==="active"){
     const sig=p.signature?'<div style="text-align:center;width:100%">'+
       '<img src="'+esc(p.signature)+'" alt="signature" style="max-height:90px;max-width:100%">'+
@@ -2602,6 +2627,7 @@ function openPlan(id){
     '</div>';
   $("#plan-foot").innerHTML=planFoot(p);
   const acc=$("#pv-accept");if(acc)acc.onclick=()=>planSignPad(id);
+  const sl=$("#pv-sendlink");if(sl)sl.onclick=()=>sendPlanLink(id); // client accepts from their phone
   const can=$("#pv-cancel");if(can)can.onclick=()=>{
     if(!confirm("Cancel this plan? Future auto-booked visits will stop."))return;
     cancelPlan(id);render();openPlan(id);toast("Plan cancelled","ok");
