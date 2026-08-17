@@ -295,6 +295,11 @@
   .modal-head h3{margin:0;font-size:18px;font-weight:800}
   .modal-head .hsub{color:var(--muted);font-size:12.5px;font-weight:600;margin-top:2px}
   .x{border:0;background:transparent;font-size:24px;color:var(--faint);line-height:1;padding:2px 7px;border-radius:8px}
+  /* Required-field rejection: the modal shakes, missing inputs go red, one red line says what's missing. */
+  @keyframes jf-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(4px)}}
+  .modal.shake{animation:jf-shake .38s ease}
+  .req-err{border-color:#f87171 !important;box-shadow:0 0 0 1px rgba(248,113,113,.35)}
+  .req-msg{color:#f87171;font-weight:700;font-size:13px;margin:4px 0 10px}
   .x:hover{background:var(--hover);color:var(--ink)}
   .modal-body{padding:20px 22px;max-height:70vh;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
   .modal-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -1597,10 +1602,13 @@ function jobForm(j,preset){
   const firstSvc=db.settings.services[0];
   const date=j?j.date:(preset.date||schedDay);
   const price=j?j.price:(firstSvc?firstSvc.price:0);
+  // New bookings start with a BLANK price — the real quoted number gets typed in, never a
+  // default that slips through unnoticed. Editing shows the job's actual price as before.
   const svcPriceBlock='<div class="grid2">'+
       '<div class="field"><label>Service</label><select id="jf-service">'+svcOpts+'</select></div>'+
-      '<div class="field pre"><label>Price</label><span class="sym" style="top:33px">$</span>'+
-        '<input id="jf-price" type="number" min="0" step="1" value="'+(+price||0)+'"></div>'+
+      '<div class="field pre"><label>Price *</label><span class="sym" style="top:33px">$</span>'+
+        '<input id="jf-price" type="number" min="0" step="1" value="'+(j?(+price||0):"")+'"'+
+        (j?"":' placeholder="'+(firstSvc?+firstSvc.price||0:0)+'"')+'></div>'+
     '</div>';
   // Reps get a stripped quick-book form: no customer picker, no crew/closer/commission/time/duration —
   // saveJobBtn() below creates the customer + job in one shot, or (when editing) only touches
@@ -1680,9 +1688,37 @@ function jobFoot(j){
     (!allDone?'<button class="btn btn-green" id="jf-done">✓ Done</button>':'')+
     (allDone?'<button class="btn sm" id="jf-undone">↩ Not done</button>':'');
 }
+/* Required fields for a NEW booking: someone to bill (new-client name OR a picked customer)
+   and a real price. Rejection = shake the modal, redden what's missing, say it in one red line. */
+function newJobMissing(){
+  const miss=[];
+  if(isRep()){
+    const presetCid=+(($("#jf-cid")||{}).value||0);
+    if(!presetCid&&!(($("#jf-name")||{}).value||"").trim())miss.push(["jf-name","Name"]);
+  }else{
+    const nw=$("#jf-newwrap");
+    const newMode=nw&&(!nw.style||nw.style.display!=="none");
+    if(newMode){if(!(($("#jf-name")||{}).value||"").trim())miss.push(["jf-name","Name"]);}
+    else if(!(+(($("#jf-cust")||{}).value||0)))miss.push(["jf-cust","Customer"]);
+  }
+  if(!(+(($("#jf-price")||{}).value||0)>0))miss.push(["jf-price","Price"]);
+  return miss;
+}
+function rejectNewJob(miss){
+  const m=document.querySelector("#job-overlay .modal");
+  if(m&&m.classList){m.classList.remove("shake");if(m.offsetWidth!==undefined)void m.offsetWidth;m.classList.add("shake");}
+  miss.forEach(([id])=>{const el=$("#"+id);if(el&&el.classList)el.classList.add("req-err");});
+  const text="Missing: "+miss.map(x=>x[1]).join(", ");
+  const old=$("#jf-reqmsg");
+  if(old)old.textContent=text;
+  else{const foot=$("#job-foot");
+    if(foot&&foot.insertAdjacentHTML)foot.insertAdjacentHTML("afterbegin",'<div class="req-msg" id="jf-reqmsg">'+esc(text)+'</div>');}
+}
 /* NEW job only (editJob is always null here — the Book button doesn't render otherwise).
    Existing jobs never reach this: every edit persists live through autoSaveJob below. */
 function saveJobBtn(){
+  const missing=newJobMissing();
+  if(missing.length){rejectNewJob(missing);return;}
   if(isRep()){
     const service=$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:"");
     const price=+$("#jf-price").value||0;
@@ -1862,7 +1898,9 @@ function openJob(id,preset){
     toast("Client created — "+c2.name,"ok");
   };
   const svc=$("#jf-service"); // absent in slot mode — the Services field has no single service/price pair
-  if(svc)svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
+  // Autofill from the service's default price only when EDITING — a new booking keeps the price
+  // blank until the real quoted number is typed (owner's order).
+  if(svc)svc.onchange=()=>{if(!editJob)return;const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
   const pick=$("#jf-pickexisting"); // new-booking default is a new client; this swaps to the picker
   if(pick)pick.onclick=()=>{
     const nw=$("#jf-newwrap"),cw=$("#jf-custwrap");
@@ -1914,7 +1952,11 @@ function openJob(id,preset){
 // (bindSvcField) since those are clicks, not change events.
 const AUTOSAVE_FIELDS=["jf-cust","jf-service","jf-price","jf-date","jf-time","jf-dur","jf-closer","jf-notes"];
 $("#job-body").addEventListener("change",e=>{
-  const t=e.target;if(!editJob||!t)return;
+  const t=e.target;if(!t)return;
+  // Fixing a flagged field clears its red mark + the "Missing:" line right away.
+  if(t.classList&&t.classList.remove)t.classList.remove("req-err");
+  const rm=$("#jf-reqmsg");if(rm&&rm.remove)rm.remove();
+  if(!editJob)return;
   if((t.id&&AUTOSAVE_FIELDS.includes(t.id))||(t.classList&&t.classList.contains("slot-price")))autoSaveJob();
 });
 
@@ -4013,19 +4055,37 @@ function bindSyncCard(){
 
 /* ---------------- Modal plumbing ---------------- */
 const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay"];
-function openModal(id){const o=$("#"+id);if(o)o.classList.add("show");}
+const openModals=new Set(); // truth for "is this modal up" — never read the DOM's class for logic
+function openModal(id){openModals.add(id);const o=$("#"+id);if(o)o.classList.add("show");}
+let jobDiscardArm=0;
 function closeModal(id){
+  // A NEW booking with something typed but requirements missing doesn't close on a stray tap —
+  // it shakes and shows what's missing. Tapping off AGAIN within 4s discards on purpose (an
+  // untouched form always closes instantly — accidental opens aren't punished).
+  if(id==="job-overlay"&&!editJob){
+    if(openModals.has("job-overlay")){
+      const touched=["jf-name","jf-phone","jf-street","jf-notes"].some(x=>{const el=$("#"+x);return el&&((el.value||"")+"").trim();})
+        ||(+(($("#jf-price")||{}).value||0)>0)||(+(($("#jf-cust")||{}).value||0)>0);
+      const miss=touched?newJobMissing():[];
+      if(touched&&miss.length&&Date.now()-jobDiscardArm>4000){
+        jobDiscardArm=Date.now();
+        rejectNewJob(miss);
+        toast("Finish the booking — or tap off again to discard","err");
+        return;
+      }
+    }
+  }
   // Fields already autosave on change (blur fires it before a click on X/backdrop reaches here),
   // but a keyboard-only close (Escape) can leave one last edit un-flushed — cheap and safe since
   // autoSaveJob is idempotent, so just always flush an in-edit job modal on the way out.
   if(id==="job-overlay"&&editJob)autoSaveJob();
+  openModals.delete(id);
   const o=$("#"+id);if(o)o.classList.remove("show");
   // Client editor opened from the job modal rides above it on a temporary z bump — undo it and
   // repaint the job modal so a renamed client shows immediately.
   if(id==="cust-overlay"&&o){
     if(o.style)o.style.zIndex="";
-    const jo=$("#job-overlay");
-    if(editJob&&jo&&jo.classList&&jo.classList.contains&&jo.classList.contains("show"))openJob(editJob);
+    if(editJob&&openModals.has("job-overlay"))openJob(editJob);
   }
 }
 function closeAllModals(){MODALS.forEach(closeModal);}
