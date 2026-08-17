@@ -3129,7 +3129,8 @@ function blastComposerHtml(){
     '<div class="field"><input id="bl-q" type="search" placeholder="Name, street, phone…" value="'+esc(st.q)+'"></div>'+
     '<div class="toolbar"><button class="btn sm" id="bl-all">All</button>'+
       '<button class="btn sm" id="bl-none">None</button>'+
-      '<button class="btn sm" id="bl-month">Done this month</button></div>'+
+      '<button class="btn sm" id="bl-month">Done this month</button>'+
+      '<button class="btn sm" id="bl-year">Done this year</button></div>'+
     '<div id="bl-list">'+(rows||'<div class="empty" style="padding:16px 0"><div class="es">No clients with a phone match.</div></div>')+'</div>';
 }
 function paintBlastList(){ // repaints the checkbox list + live count only — the search box keeps focus
@@ -3191,6 +3192,12 @@ function paintBlast(){
   $("#bl-month").onclick=()=>{
     const ym=today().slice(0,7);
     const doneIds=new Set(db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===ym).map(j=>j.customerId));
+    blastPhoneClients().filter(c=>doneIds.has(c.id)).forEach(c=>st.selected.add(c.id));
+    paintBlastList();
+  };
+  $("#bl-year").onclick=()=>{
+    const yy=today().slice(0,4);
+    const doneIds=new Set(db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,4)===yy).map(j=>j.customerId));
     blastPhoneClients().filter(c=>doneIds.has(c.id)).forEach(c=>st.selected.add(c.id));
     paintBlastList();
   };
