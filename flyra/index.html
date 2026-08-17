@@ -827,6 +827,11 @@ function normalize(r){
   if(typeof s.referral.template!=="string")s.referral.template=d.referral.template;
   for(const k of ["users","customers","jobs","invoices","plans","pins","messages","equipment","expenses","payouts"])
     if(!Array.isArray(r[k]))r[k]=[];
+  // tombstones: {id,t} per collection so a delete on one device survives a merge with a stale
+  // copy from another — only collections a device can actually hard-delete need one.
+  if(!r.deleted||typeof r.deleted!=="object")r.deleted={};
+  for(const k of ["jobs","customers","plans","messages","payouts"])
+    if(!Array.isArray(r.deleted[k]))r.deleted[k]=[];
   // per-row guards — a hand-edited or older file must never crash a renderer
   r.customers.forEach(c=>{
     if(!Array.isArray(c.tags))c.tags=[];
@@ -872,6 +877,12 @@ function normalize(r){
   return r;
 }
 function save(){db.updatedAt=Date.now();localStorage.setItem(DBKEY,JSON.stringify(db));scheduleSync();}
+/* Record a hard delete so a merge with a stale copy from another device can't resurrect it.
+   Capped at the newest 500 per collection — plenty for a rolling week of cleanup on any device. */
+function tomb(coll,id){
+  db.deleted[coll].push({id,t:Date.now()});
+  if(db.deleted[coll].length>500)db.deleted[coll]=db.deleted[coll].slice(-500);
+}
 function load(){
   let r=null;try{r=JSON.parse(localStorage.getItem(DBKEY));}catch(e){}
   if(r&&Array.isArray(r.customers))return normalize(r);
@@ -1395,7 +1406,7 @@ function renderRepHome(){
   const p=$("#rep-period");if(p)p.onchange=()=>{repPeriod=p.value;renderRepHome();};
   const cc=$("#rep-comm-chip");if(cc)cc.onclick=()=>{repCommOpen=!repCommOpen;renderRepHome();};
   document.querySelectorAll("[data-repdone]").forEach(b=>b.onclick=()=>{
-    completeJobFlow(+b.dataset.repdone);renderRepHome();});
+    if(completeJobFlow(+b.dataset.repdone))renderRepHome();else toast("Left as booked","ok");});
   document.querySelectorAll("[data-jobcard]").forEach(el=>el.onclick=()=>openJob(+el.dataset.jobcard));
   document.querySelectorAll("[data-repcust]").forEach(el=>el.onclick=()=>openCustProfile(+el.dataset.repcust));
 }
@@ -1436,13 +1447,16 @@ function createJob(data){
   db.jobs.push(j);save();return j;
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
-function deleteJob(id){db.jobs=db.jobs.filter(x=>x.id!==id);save();}
-/* Done flow: stamp status+completedAt, ask what was collected, log it on the customer. */
+function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);save();}
+/* Done flow — three-way (owner's bug report: Cancel used to still mark it done, which read as
+   "collected"): OK = done + paid · Cancel then OK = done, NOT paid yet · Cancel twice = abort,
+   the job stays booked and nothing changes. */
 function completeJobFlow(id){
   const j=db.jobs.find(x=>x.id===id);if(!j)return null;
-  j.status="done";if(!j.completedAt)j.completedAt=Date.now();
   const price=+j.price||0;
   const paid=price>0&&confirm("Collected "+money(price)+"?");
+  if(!paid&&price>0&&!confirm("Mark it done but NOT paid yet?"))return null; // backed out — stays booked
+  j.status="done";if(!j.completedAt)j.completedAt=Date.now();
   j.collected=paid?price:0;
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+j.service+" — "+(paid?"collected "+money(price):"unpaid")});}
@@ -1940,8 +1954,9 @@ function openJob(id,preset){
   };
   const done=$("#jf-done");if(done)done.onclick=()=>{
     const cj=db.jobs.find(x=>x.id===editJob),sibs=cj?slotSiblings(cj):[];
-    if(sibs.length>1)completeSlot(cj.customerId,cj.date,cj.time||""); // one combined payment question
-    else completeJobFlow(editJob);
+    const r=sibs.length>1?completeSlot(cj.customerId,cj.date,cj.time||"") // one combined payment question
+      :completeJobFlow(editJob);
+    if(!r){toast("Left as booked","ok");return;} // backed out of both prompts — nothing changed
     closeModal("job-overlay");render();
     toast("Job marked done","ok");
   };
@@ -2071,6 +2086,7 @@ function completeSlot(customerId,date,time){
   if(!jobs.length)return null;
   const total=jobs.reduce((s,j)=>s+(+j.price||0),0);
   const paid=total>0&&confirm("Collected "+money(total)+" for "+jobs.map(j=>j.service).join(" + ")+"?");
+  if(!paid&&total>0&&!confirm("Mark it done but NOT paid yet?"))return null; // backed out — stays booked
   jobs.forEach(j=>{j.status="done";if(!j.completedAt)j.completedAt=Date.now();j.collected=paid?(+j.price||0):0;});
   const c=custById(customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+jobs.map(j=>j.service).join(" + ")+" — "+(paid?"collected "+money(total):"unpaid")});}
@@ -2102,6 +2118,7 @@ function createCust(data){
 function updateCust(id,data){const c=custById(id);if(!c)return null;Object.assign(c,data);save();return c;}
 /* Pins outlive their customer — unlink instead of leaving a dangling id behind. */
 function deleteCust(id){
+  tomb("customers",id);
   db.customers=db.customers.filter(c=>c.id!==id);
   db.pins.forEach(p=>{if(p.customerId===id)p.customerId=null;});
   save();
@@ -2980,7 +2997,7 @@ function sendMsg(id){
   markHandedOff(id);render();
   toast("Messages opened — press send there","ok");
 }
-function deleteMsg(id){db.messages=db.messages.filter(x=>x.id!==id);save();}
+function deleteMsg(id){tomb("messages",id);db.messages=db.messages.filter(x=>x.id!==id);save();}
 
 /* --- screen --- */
 function msgRow(m,off){
@@ -4075,9 +4092,11 @@ function bindSettingsEvents(){
 }
 
 /* ---------------- Cloud sync (private GitHub gist — ported from Desktop\CRM.html, owner's code) ----
-   Whole-file last-write-wins on db.updatedAt: newest copy wins, no merge. The token lives in
-   localStorage ONLY — never in db, never in a backup, never in the gist. This is the one place in
-   the app that touches api.github.com, and only once a token is stored. */
+   Record-level merge, not whole-file last-write-wins: mergeDb() unions every collection by id,
+   drops what's tombstoned, and keeps BOTH sides of a same-id collision (re-idding the local one)
+   instead of one device's edit silently erasing the other's. The token lives in localStorage ONLY
+   — never in db, never in a backup, never in the gist. This is the one place in the app that
+   touches api.github.com, and only once a token is stored. */
 const SYNC_KEY="flyra.synckey",SYNC_GIST="flyra.syncgist",SYNC_LAST="flyra.synclast",GIST_FILE="flyra-db.json";
 let syncState="off",syncBusy=false,syncTimer=null,syncArmed=false,syncArms=0; // off|ok|err
 function syncToken(){try{return localStorage.getItem(SYNC_KEY)||"";}catch(e){return"";}}
@@ -4108,7 +4127,98 @@ async function syncFetchRemote(id){
   const remote=JSON.parse(text);
   return (remote&&Array.isArray(remote.customers))?remote:null;
 }
-/* Cloud wins: take it whole and write straight to storage — save() would push it right back. */
+/* ---- mergeDb: pure record-level merge, never mutates either argument ----
+   customers first (others reference customerId), then users (jobs reference closerId) — both are
+   the only collections a same-id collision can re-id (both carry createdAt; the rest don't, so a
+   same-id collision on them just falls through to newer-db-wins on that one record — see the
+   punted-edge-case note in the gate). Order after that doesn't matter. */
+const MERGE_ORDER=["customers","users","plans","jobs","messages","pins","payouts"];
+const TOMB_COLLS=["jobs","customers","plans","messages","payouts"];
+const SEQ_OF={customers:"seqC",jobs:"seqJ",plans:"seqP",messages:"seqM",payouts:"seqPay",users:"seqU",pins:"seqPin"};
+function remapRefs(coll,rec,reidMaps){
+  const cm=reidMaps.customers,um=reidMaps.users;
+  let out=rec;
+  if((coll==="jobs"||coll==="messages"||coll==="plans"||coll==="pins")&&cm&&rec.customerId!=null&&cm[rec.customerId]!=null)
+    out=Object.assign({},out,{customerId:cm[rec.customerId]});
+  if(coll==="jobs"&&um&&rec.closerId!=null&&um[rec.closerId]!=null)
+    out=Object.assign({},out,{closerId:um[rec.closerId]});
+  if(coll==="payouts"&&um&&rec.userId!=null&&um[rec.userId]!=null)
+    out=Object.assign({},out,{userId:um[rec.userId]});
+  return out;
+}
+function mergeDb(local,remote){
+  local=local||{};remote=remote||{};
+  const localNewer=(local.updatedAt||0)>=(remote.updatedAt||0);
+  const out=JSON.parse(JSON.stringify(local)); // base: settings/invoices/equipment/expenses/v ride along untouched
+  // tombstones: union both sides, newest t per id wins, cap 500
+  out.deleted={};
+  TOMB_COLLS.forEach(k=>{
+    const map=new Map();
+    [...(((local.deleted||{})[k])||[]),...(((remote.deleted||{})[k])||[])].forEach(t=>{
+      if(!t||t.id==null)return;
+      const p=map.get(t.id);
+      if(!p||(+t.t||0)>(+p.t||0))map.set(t.id,{id:t.id,t:+t.t||0});
+    });
+    out.deleted[k]=[...map.values()].sort((a,b)=>b.t-a.t).slice(0,500);
+  });
+  const isTomb=(coll,id,createdAt)=>(out.deleted[coll]||[]).some(t=>t.id===id&&t.t>=(createdAt||0));
+  // settings: whole object from the newer side — too intertwined to merge field-by-field
+  if(!localNewer&&remote.settings)out.settings=JSON.parse(JSON.stringify(remote.settings));
+  const reidMaps={};
+  MERGE_ORDER.forEach(coll=>{
+    const lList=(local[coll]||[]).map(r=>remapRefs(coll,r,reidMaps));
+    const rList=remote[coll]||[];
+    const lMap=new Map(lList.map(r=>[r.id,r])),rMap=new Map(rList.map(r=>[r.id,r]));
+    const ids=new Set([...lList.map(r=>r.id),...rList.map(r=>r.id)]);
+    let nextId=Math.max(0,...lList.map(r=>+r.id||0),...rList.map(r=>+r.id||0),
+      (+local[SEQ_OF[coll]]||0)-1,(+remote[SEQ_OF[coll]]||0)-1)+1;
+    const result=[],reidMap={};
+    ids.forEach(id=>{
+      const l=lMap.get(id),r=rMap.get(id);
+      if(l&&r){
+        if(JSON.stringify(l)===JSON.stringify(r)){result.push(l);return;}
+        const bothCreated=Number.isFinite(l.createdAt)&&Number.isFinite(r.createdAt);
+        if(bothCreated&&Math.abs(l.createdAt-r.createdAt)>5000){
+          // two different records that raced onto the same counter — keep both, re-id the local one
+          const newId=nextId++;
+          reidMap[id]=newId;
+          result.push(Object.assign({},l,{id:newId}));
+          result.push(r);
+        }else result.push(localNewer?l:r); // one record, evolved — newer db.updatedAt wins it whole
+        return;
+      }
+      const rec=l||r;
+      if(TOMB_COLLS.includes(coll)&&isTomb(coll,id,rec.createdAt))return; // deleted after it was born — drop
+      result.push(rec);
+    });
+    reidMaps[coll]=reidMap;
+    out[coll]=result;
+    out[SEQ_OF[coll]]=nextId;
+  });
+  out.updatedAt=dbEquivalent(out,remote)?remote.updatedAt:Date.now();
+  return out;
+}
+function collEqual(a,b){
+  a=a||[];b=b||[];if(a.length!==b.length)return false;
+  const bm=new Map(b.map(r=>[r.id,r]));
+  return a.every(r=>bm.has(r.id)&&JSON.stringify(bm.get(r.id))===JSON.stringify(r));
+}
+function tombEqual(a,b){
+  a=a||[];b=b||[];if(a.length!==b.length)return false;
+  const bm=new Map(b.map(t=>[t.id,t.t]));
+  return a.every(t=>bm.get(t.id)===t.t);
+}
+/* Order-independent "is this the same data" check — array order from Set/Map iteration must never
+   count as a difference, or syncPull/syncPush would loop pushing/pulling no-op reorders forever. */
+function dbEquivalent(a,b){
+  if(!a||!b)return false;
+  if(JSON.stringify(a.settings)!==JSON.stringify(b.settings))return false;
+  for(const k of MERGE_ORDER)if(!collEqual(a[k],b[k]))return false;
+  for(const k of TOMB_COLLS)if(!tombEqual((a.deleted||{})[k],(b.deleted||{})[k]))return false;
+  for(const k of Object.values(SEQ_OF))if((+a[k]||0)!==(+b[k]||0))return false;
+  return true;
+}
+/* Write a db straight to storage and repaint — save() would schedule a push right back. */
 function adoptCloud(remote){
   db=normalize(remote);
   localStorage.setItem(DBKEY,JSON.stringify(db));
@@ -4118,18 +4228,27 @@ async function syncPull(){
   if(!syncToken())return false;
   try{
     const id=await syncFindGist();
-    if(!id){syncState="ok";paintSyncChip();return false;}
-    const remote=await syncFetchRemote(id);
+    const remote=id?await syncFetchRemote(id):null;
     syncState="ok";
-    if(remote&&(remote.updatedAt||0)>(db.updatedAt||0)){adoptCloud(remote);toast("Synced from your other device","ok");}
+    if(!remote){await syncPush();paintSyncChip();return true;} // nothing up there yet — seed it
+    const merged=mergeDb(db,remote);
+    if(!dbEquivalent(merged,db)){adoptCloud(merged);toast("Synced from your other device","ok");}
+    if(!dbEquivalent(merged,remote))await syncPush(); // this device had something the cloud didn't — send it back
     paintSyncChip();return true;
   }catch(e){syncState="err";paintSyncChip();return false;}
 }
+/* Pull-merge-push: a stale device can never clobber, because what actually gets PATCHed is always
+   this device's data merged with whatever's on the gist right now, not a raw overwrite. */
 async function syncPush(){
   if(!syncToken()||syncBusy)return;
   syncBusy=true;
   try{
     const id=await syncFindGist();
+    const remote=id?await syncFetchRemote(id):null;
+    if(remote){
+      const merged=mergeDb(db,remote);
+      if(!dbEquivalent(merged,db))adoptCloud(merged);
+    }
     const payload={description:"Flyra — synced data (auto-managed, don't edit)",public:false,
       files:{[GIST_FILE]:{content:JSON.stringify(db)}}};
     if(id)await gh("PATCH","/gists/"+id,payload);
@@ -4159,19 +4278,19 @@ function paintSyncCard(){
   const st=$("#sync-state");if(!st)return;
   st.textContent=!syncToken()?"off — paste a token below (do this on every device)":
     syncState==="err"?"error — check the token, then tap the chip in the menu":
-    "on — this device pushes every change and pulls when it opens";
+    "on — this device pushes every change and merges in the background about once a minute";
 }
-/* Pairing decides pull-vs-push out loud, so a fresh phone never silently clobbers the cloud. */
+/* Merge means OK/Cancel can no longer destroy anything on either side, so pairing just merges —
+   a fresh phone folds into the cloud copy and pushes right back, same as any other sync tick. */
 async function syncConnect(token){
   localStorage.setItem(SYNC_KEY,token);
   try{
     const id=await syncFindGist();
-    if(id){
-      const remote=await syncFetchRemote(id);
-      if(remote&&confirm("Cloud copy found: "+remote.customers.length+" clients, "+(remote.jobs||[]).length+" jobs.\n\n"+
-        "Load the cloud copy onto this device? OK = replace this device's data with the cloud. Cancel = overwrite the cloud with THIS device.")){
-        adoptCloud(remote);toast("Cloud data loaded onto this device","ok");
-      }else{await syncPush();toast("Cloud updated from this device","ok");}
+    const remote=id?await syncFetchRemote(id):null;
+    if(remote){
+      const merged=mergeDb(db,remote);
+      if(!dbEquivalent(merged,db))adoptCloud(merged);
+      await syncPush();toast("Cloud and this device merged — nothing lost either way","ok");
     }else{await syncPush();toast("Sync on — this device seeded the cloud","ok");}
     syncState="ok";
   }catch(e){syncState="err";toast("Sync setup failed — "+((e&&e.message)||"check the token"),"err");}
@@ -4193,8 +4312,9 @@ async function syncNow(){
 function syncCard(){
   return '<div class="panel"><h2>Cloud sync</h2><div class="panel-pad">'+
     '<div class="note" style="margin-bottom:12px"><b>Status:</b> <span id="sync-state">…</span><br>'+
-      'Every change uploads to a <b>private</b> GitHub gist ('+esc(GIST_FILE)+') on your account, and each '+
-      'device pulls the newest copy when it opens. Newest wins, whole file.</div>'+
+      'Every change uploads to a <b>private</b> GitHub gist ('+esc(GIST_FILE)+') on your account. Each '+
+      'device merges in the cloud copy record-by-record — when it opens, and about once a minute after — '+
+      'so a change on one device is never erased by a stale copy on another.</div>'+
     '<div class="field"><label>GitHub token</label>'+
       '<input id="sync-key" type="password" autocomplete="off" placeholder="ghp_…"></div>'+
     '<div class="toolbar"><button class="btn sm btn-primary" id="sync-connect">Connect</button>'+
@@ -4283,6 +4403,8 @@ if(bootQueued)toast(bootQueued+" draft"+(bootQueued===1?"":"s")+" queued — tap
 // Sync is the only thing that reaches the network on open, and only when this device has a token.
 paintSyncChip();
 if(syncToken())syncPull();
+// "always sync, once a minute or so" — pull-merge-push on a timer, same gated-on-token rule as boot.
+setInterval(()=>{if(syncToken()&&!syncBusy)syncPull();},60000);
 </script>
 </body>
 </html>
