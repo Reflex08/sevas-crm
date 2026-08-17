@@ -250,6 +250,7 @@
   .tl-card .s{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:1px}
   .tl-card .tr{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:1px}
   .tl-card .p{font-weight:800;font-size:14px;margin-top:6px}
+  .conf-ck{color:var(--green);font-weight:800}
   .tl-slot{cursor:pointer}
   .tl-item{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:rgba(255,255,255,.9);padding:1px 0}
   /* ---------- Week view ---------- */
@@ -284,7 +285,7 @@
     justify-content:center;padding:34px 16px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .overlay.show{display:flex}
   body:has(.overlay.show){overflow:hidden} /* page behind a modal must not scroll */
-  #cust-overlay{z-index:50} #job-overlay{z-index:60} #invoice-overlay,#plan-overlay{z-index:70}
+  #cust-overlay{z-index:50} #job-overlay{z-index:60} #blast-overlay{z-index:65} #invoice-overlay,#plan-overlay{z-index:70}
   #sign-overlay{z-index:80}
   .modal{background:#15161c;border:1px solid var(--line);border-radius:20px;width:100%;max-width:640px;box-shadow:var(--shadow-lg);margin:auto 0}
   .modal.lg{max-width:760px} .modal.sm{max-width:520px}
@@ -478,6 +479,14 @@
     <button class="x" data-close="sign-overlay" aria-label="Close">&times;</button></div>
   <div class="modal-body" id="sign-body"></div>
   <div class="modal-foot" id="sign-foot"></div>
+</div></div>
+
+<!-- Text blast -->
+<div class="overlay" id="blast-overlay"><div class="modal">
+  <div class="modal-head"><div><h3 id="blast-title">Text blast</h3><div class="hsub" id="blast-hsub"></div></div>
+    <button class="x" data-close="blast-overlay" aria-label="Close">&times;</button></div>
+  <div class="modal-body" id="blast-body"></div>
+  <div class="modal-foot" id="blast-foot"></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -701,7 +710,7 @@ const DEFAULT_SETTINGS=()=>({
     "5. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
     "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
     "Confirming this booking means you've read and agree to these terms."},
-  referral:{theyGet:25,youGet:50,giftCard:0,sendWhen:"done",
+  referral:{theyGet:25,youGet:25,giftCard:0,sendWhen:"done",
     template:"Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}"},
 });
 const SIG_STUB="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -1493,13 +1502,14 @@ function groupSlotJobs(jobs){
   groups.forEach(g=>{g.services=g.jobs.map(x=>x.service).join(" + ");g.total=g.jobs.reduce((s,x)=>s+(+x.price||0),0);});
   return groups;
 }
+function confCk(){return '<span class="conf-ck" title="Confirmed by client">✓</span>';}
 function tlCard(j){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=j.status==="done";
   const range=j.time?tlTimeRange(j.time):"";
   return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
-    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
-    '<div class="s">'+esc(j.service)+(j.termsAcceptedAt?' <span style="opacity:.6" title="Terms confirmed">📋</span>':'')+'</div>'+
+    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+(j.termsAcceptedAt?" "+confCk():"")+'</div>'+
+    '<div class="s">'+esc(j.service)+'</div>'+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
     '<div class="p">'+money2(j.price)+'</div>'+
   '</div>';
@@ -1511,10 +1521,11 @@ function tlGroupCard(g){
   if(g.jobs.length===1)return tlCard(g.job);
   const j=g.job,c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=g.jobs.every(x=>x.status==="done");
+  const confirmed=g.jobs.every(x=>x.termsAcceptedAt); // confirmLink confirms the whole visit at once
   const range=j.time?tlTimeRange(j.time):"";
   const rows=g.jobs.map(x=>'<div class="tl-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
   return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
-    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
+    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+(confirmed?" "+confCk():"")+'</div>'+
     rows+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
     '<div class="p">'+money2(g.total)+'</div>'+
@@ -1539,7 +1550,7 @@ function weekCard(j){
   const done=j.status==="done";
   return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
-    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
+    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+(j.termsAcceptedAt?" "+confCk():"")+'</div>'+
     '<div class="wp">'+money2(j.price)+'</div>'+
   '</div>';
 }
@@ -1547,10 +1558,11 @@ function weekGroupCard(g){
   if(g.jobs.length===1)return weekCard(g.job);
   const j=g.job,c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=g.jobs.every(x=>x.status==="done");
+  const confirmed=g.jobs.every(x=>x.termsAcceptedAt);
   const rows=g.jobs.map(x=>'<div class="wk-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
   return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
-    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+'</div>'+
+    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+(confirmed?" "+confCk():"")+'</div>'+
     rows+
     '<div class="wp">'+money2(g.total)+'</div>'+
   '</div>';
@@ -1875,7 +1887,10 @@ function openJob(id,preset){
   const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
   $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
     (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"")+
-    (showConfirm?' <button class="btn sm" id="jf-confirm" style="margin-left:8px">'+(j.termsAcceptedAt?"✓ Confirmed":"📋 Confirm")+'</button>':"")+
+    (showConfirm?(j.termsAcceptedAt?
+      ' <button class="btn sm" id="jf-confirm" style="margin-left:8px">✓ Confirmed</button>':
+      ' <button class="btn sm" id="jf-confirm" style="margin-left:8px">📋 Confirm</button>'+
+      ' <button class="btn sm" id="jf-markconfirm" style="margin-left:8px">✓ Mark confirmed</button>'):"")+
     (addr?'<div style="margin-top:5px"><a href="https://waze.com/ul?q='+encodeURIComponent(addr)+'&navigate=yes" target="_blank" rel="noopener" '+
       'style="color:var(--brand);font-weight:600;text-decoration:none">📍 '+esc(addr)+'</a></div>':"");
   const ecBtn=$("#jf-editcust");
@@ -1943,7 +1958,17 @@ function openJob(id,preset){
     closeModal("job-overlay");render();
     toast("Back on the schedule","ok");
   };
-  const conf=$("#jf-confirm");if(conf)conf.onclick=()=>sendConfirmLink(editJob); // client confirms, not the owner
+  const conf=$("#jf-confirm");if(conf)conf.onclick=()=>{
+    if(j.termsAcceptedAt){ // ✓ Confirmed chip — tap to undo a mistaken mark
+      if(!confirm("Remove the confirmation mark?"))return;
+      slotSiblings(j).forEach(sj=>{sj.termsAcceptedAt=0;});
+      save();openJob(editJob);toast("Confirmation removed","ok");
+    }else sendConfirmLink(editJob); // client confirms, not the owner
+  };
+  const mc=$("#jf-markconfirm");if(mc)mc.onclick=()=>{ // owner stamps proof that arrived by text/email
+    slotSiblings(j).forEach(sj=>confirmBooking(sj.id));
+    openJob(editJob);toast("Marked confirmed","ok");
+  };
   openModal("job-overlay");
 }
 // ONE delegated listener for every autosaving field, rather than wiring each one — fires on
@@ -2746,8 +2771,17 @@ function sendConfirmLink(id){
   const link=confirmLink(id);if(!link)return;
   const j=db.jobs.find(x=>x.id===id),c=j?custById(j.customerId):null;
   const ph=c?cleanNum(c.phone):"";
-  const body="Hi "+(c?firstName(c.name):"")+", please review and confirm your booking with "+
-    ((db.settings.business||{}).name||"us")+": "+link;
+  // The text reads like a real booking summary — name, service(s), date/time, address, price —
+  // then the link. ("Hi Jessica, please confirm your Window Cleaning on Sunday Aug 17 at 6:30 PM
+  // — 186 Byng Ave, $375. Confirm here: …")
+  const sibs=slotSiblings(j);
+  const services=sibs.map(x=>x.service).join(" + ");
+  const total=sibs.reduce((s,x)=>s+(+x.price||0),0);
+  const when=new Date(j.date+"T12:00:00").toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"})+
+    (j.time?" at "+fmtTime(j.time):"");
+  const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
+  const body="Hi "+(c?firstName(c.name):"")+", please confirm your "+services+" on "+when+
+    (addr?" — "+addr:"")+", "+money(total)+". Confirm here: "+link;
   if(ph)location.href="sms:+"+ph+"?&body="+encodeURIComponent(body);
   else prompt("No phone on file for "+(c?c.name:"this client")+" — copy the link:",link);
 }
@@ -2996,7 +3030,8 @@ function renderMessages(){
   const off=db.messages.filter(m=>m.status==="handed-off").slice().sort((x,y)=>(y.t||0)-(x.t||0)).slice(0,10);
   $("#content").innerHTML=
     '<div class="lx-bar"><div class="lx-title" style="cursor:default">Messages</div>'+
-      '<button class="mpill" id="msg-run" style="margin-left:auto">⚡ Run automations</button></div>'+
+      (isRep()?"":'<button class="mpill" id="msg-blast" style="margin-left:auto">📣 Text blast</button>')+
+      '<button class="mpill" id="msg-run"'+(isRep()?' style="margin-left:auto"':'')+'>⚡ Run automations</button></div>'+
     '<div class="lead-total" style="margin:0 0 14px">Queued — tap to send. Nothing goes out on its own.</div>'+
     '<div class="panel"><h2>Outbox<span class="pill">'+q.length+' queued</span></h2><div class="panel-pad">'+
       (q.length?
@@ -3012,6 +3047,7 @@ function renderMessages(){
   $("#msg-run").onclick=()=>{
     const n=runAutomations();stampAutoRun();render();
     toast(n?("Queued "+n+" draft"+(n===1?"":"s")+" — tap to send"):"Nothing new to queue","ok");};
+  const blastBtn=$("#msg-blast");if(blastBtn)blastBtn.onclick=openBlast;
   document.querySelectorAll("[data-msend]").forEach(b=>b.onclick=()=>sendMsg(+b.dataset.msend));
   document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{
     deleteMsg(+b.dataset.mdel);render();toast("Draft deleted");});
@@ -3026,6 +3062,130 @@ function renderMessages(){
     db.settings.automation.reviewAskAfterDone=!!e.target.checked;save();toast("Saved","ok");};
   $("#au-link").onchange=e=>{
     db.settings.automation.reviewLink=(e.target.value||"").trim();save();toast("Saved","ok");};
+}
+/* ---------------- Text blast ----------------
+   Handoff tool only, same rule as everything else in Messages: no db writes, no message records.
+   Owner picks a template + a client list, taps Start, then taps Send once per client — each tap
+   opens sms: on the owner's own phone. Nothing here ever sends by itself. Owner-only (msg-blast
+   button is hidden in rep mode; this modal is unreachable without it). */
+const BLAST_REVIEW_DEFAULT="Hi {firstname}, thanks for choosing {company}! If you were happy with the work, a quick review would mean the world: ";
+let blastCustomBody=""; // last-used custom body — module memory only, never db/settings
+let blastState={tpl:"review",body:BLAST_REVIEW_DEFAULT,q:"",selected:new Set(),step:"compose",sent:new Set()};
+function blastTplBody(key){
+  if(key==="review")return BLAST_REVIEW_DEFAULT;
+  if(key==="referral")return (db.settings.referral||{}).template||"";
+  return blastCustomBody;
+}
+/* Per-client substitution for the blast's own tokens — deliberately just these three, not the
+   Messages engine's {name}/{service}/{date} set (fillVars), since a blast has no job attached. */
+function blastBody(body,c){
+  return (body||"")
+    .replace(/\{firstname\}/gi,firstName(c.name))
+    .replace(/\{company\}/gi,(db.settings.business||{}).name||"")
+    .replace(/\{referral_link\}/gi,referralLink(c.id)||"");
+}
+function blastPhoneClients(){return db.customers.filter(c=>cleanNum(c.phone));}
+function blastClients(){ // the phoned list, narrowed by the search box
+  const q=blastState.q.trim().toLowerCase();
+  return blastPhoneClients().filter(c=>!q||(c.name||"").toLowerCase().includes(q)||
+    (c.street||"").toLowerCase().includes(q)||(c.phone||"").toLowerCase().includes(q));
+}
+function openBlast(){
+  blastState={tpl:"review",body:BLAST_REVIEW_DEFAULT,q:"",selected:new Set(),step:"compose",sent:new Set()};
+  paintBlast();
+  openModal("blast-overlay");
+}
+function blastClientRow(c){
+  return '<label class="jobline" style="cursor:pointer">'+
+    '<input type="checkbox" data-bsel="'+c.id+'"'+(blastState.selected.has(c.id)?" checked":"")+' style="margin-right:10px">'+
+    '<div style="flex:1;min-width:0"><div class="nm">'+esc(c.name)+'</div><div class="sub">'+esc(c.street||"")+'</div></div>'+
+  '</label>';
+}
+function blastComposerHtml(){
+  const st=blastState;
+  const opts=[["review","Review request"],["referral","Referral"],["custom","Custom"]]
+    .map(([v,l])=>'<option value="'+v+'"'+(st.tpl===v?" selected":"")+'>'+l+'</option>').join("");
+  const rows=blastClients().map(blastClientRow).join("");
+  return '<div class="field"><label>Message</label><select id="bl-tpl">'+opts+'</select></div>'+
+    '<div class="field"><textarea id="bl-body" rows="4">'+esc(st.body)+'</textarea></div>'+
+    '<div class="sec"><span id="bl-count">'+st.selected.size+' selected</span></div>'+
+    '<div class="field"><input id="bl-q" type="search" placeholder="Name, street, phone…" value="'+esc(st.q)+'"></div>'+
+    '<div class="toolbar"><button class="btn sm" id="bl-all">All</button>'+
+      '<button class="btn sm" id="bl-none">None</button>'+
+      '<button class="btn sm" id="bl-month">Done this month</button></div>'+
+    '<div id="bl-list">'+(rows||'<div class="empty" style="padding:16px 0"><div class="es">No clients with a phone match.</div></div>')+'</div>';
+}
+function paintBlastList(){ // repaints the checkbox list + live count only — the search box keeps focus
+  const list=$("#bl-list");if(!list)return;
+  const rows=blastClients().map(blastClientRow).join("");
+  list.innerHTML=rows||'<div class="empty" style="padding:16px 0"><div class="es">No clients with a phone match.</div></div>';
+  document.querySelectorAll("[data-bsel]").forEach(el=>el.onchange=()=>{
+    const id=+el.dataset.bsel;
+    if(el.checked)blastState.selected.add(id);else blastState.selected.delete(id);
+    updateBlastCount();
+  });
+  updateBlastCount();
+}
+function updateBlastCount(){
+  const n=blastState.selected.size;
+  const cnt=$("#bl-count");if(cnt)cnt.textContent=n+" selected";
+  const start=$("#bl-start");if(start)start.disabled=!n;
+}
+/* One row per selected client: name, a truncated personalized preview, one deliberate Send tap. */
+function blastSendRow(c){
+  const body=blastBody(blastState.body,c),sent=blastState.sent.has(c.id);
+  return '<div class="jobline">'+
+    '<div style="flex:1;min-width:0"><div class="nm">'+esc(c.name)+(sent?' <span class="conf-ck">✓</span>':'')+'</div>'+
+    '<div class="sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(body)+'</div></div>'+
+    '<button class="btn sm'+(sent?"":" btn-primary")+'" data-bsend="'+c.id+'"'+(sent?" disabled":"")+'>'+(sent?"Sent":"Send →")+'</button>'+
+  '</div>';
+}
+function blastSendListHtml(){
+  return db.customers.filter(c=>blastState.selected.has(c.id)).map(blastSendRow).join("");
+}
+function blastFoot(){
+  if(blastState.step==="send")return '<button class="btn" id="bl-back">← Back</button>';
+  const n=blastState.selected.size;
+  return '<button class="btn btn-primary" id="bl-start"'+(n?"":" disabled")+'>Start ('+n+')</button>';
+}
+function paintBlast(){
+  const st=blastState;
+  $("#blast-hsub").textContent=st.step==="send"?st.selected.size+" selected":"";
+  $("#blast-body").innerHTML=st.step==="send"?blastSendListHtml():blastComposerHtml();
+  $("#blast-foot").innerHTML=blastFoot();
+  if(st.step==="send"){
+    // Each Send is one deliberate tap — sms: opens the owner's own Messages app, nothing auto-fires.
+    document.querySelectorAll("[data-bsend]").forEach(b=>b.onclick=()=>{
+      const id=+b.dataset.bsend,c=custById(id),to=cleanNum(c&&c.phone);
+      if(!c||!to)return;
+      location.href="sms:+"+to+"?&body="+encodeURIComponent(blastBody(st.body,c));
+      st.sent.add(id);
+      paintBlast();
+    });
+    $("#bl-back").onclick=()=>{st.step="compose";paintBlast();};
+    return;
+  }
+  $("#bl-tpl").onchange=e=>{st.tpl=e.target.value;st.body=blastTplBody(st.tpl);paintBlast();};
+  $("#bl-body").addEventListener("input",e=>{st.body=e.target.value;if(st.tpl==="custom")blastCustomBody=st.body;});
+  const q=$("#bl-q");
+  q.addEventListener("input",e=>{st.q=e.target.value;paintBlastList();});
+  $("#bl-all").onclick=()=>{blastPhoneClients().forEach(c=>st.selected.add(c.id));paintBlastList();};
+  $("#bl-none").onclick=()=>{st.selected.clear();paintBlastList();};
+  $("#bl-month").onclick=()=>{
+    const ym=today().slice(0,7);
+    const doneIds=new Set(db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===ym).map(j=>j.customerId));
+    blastPhoneClients().filter(c=>doneIds.has(c.id)).forEach(c=>st.selected.add(c.id));
+    paintBlastList();
+  };
+  document.querySelectorAll("[data-bsel]").forEach(el=>el.onchange=()=>{
+    const id=+el.dataset.bsel;
+    if(el.checked)st.selected.add(id);else st.selected.delete(id);
+    updateBlastCount();
+  });
+  const start=$("#bl-start");if(start)start.onclick=()=>{
+    if(!st.selected.size)return;
+    st.step="send";st.sent=new Set();paintBlast();
+  };
 }
 /* ---------------- Team / Payroll / Equipment / Expenses (screen 9) ---------------- */
 let teamEditUser=null;            // user id in inline edit, "new" while adding, else null
@@ -4054,7 +4214,7 @@ function bindSyncCard(){
 }
 
 /* ---------------- Modal plumbing ---------------- */
-const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay"];
+const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay","blast-overlay"];
 const openModals=new Set(); // truth for "is this modal up" — never read the DOM's class for logic
 function openModal(id){openModals.add(id);const o=$("#"+id);if(o)o.classList.add("show");}
 let jobDiscardArm=0;
