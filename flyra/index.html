@@ -288,7 +288,10 @@
   #sign-overlay{z-index:80}
   .modal{background:#15161c;border:1px solid var(--line);border-radius:20px;width:100%;max-width:640px;box-shadow:var(--shadow-lg);margin:auto 0}
   .modal.lg{max-width:760px} .modal.sm{max-width:520px}
-  .modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}
+  /* Sticky: the ✕ stays reachable however far the modal scrolls (owner: "I don't wanna scroll
+     all the way up just to close"), and the backdrop tap still closes as before. */
+  .modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;
+    position:sticky;top:0;background:#15161c;z-index:3;border-radius:20px 20px 0 0}
   .modal-head h3{margin:0;font-size:18px;font-weight:800}
   .modal-head .hsub{color:var(--muted);font-size:12.5px;font-weight:600;margin-top:2px}
   .x{border:0;background:transparent;font-size:24px;color:var(--faint);line-height:1;padding:2px 7px;border-radius:8px}
@@ -1640,7 +1643,21 @@ function jobForm(j,preset){
   // per service (slotServicesField/applySlotServices), everything else in the form is unchanged.
   const siblings=j?slotSiblings(j):[];
   const svcField=siblings.length>1?slotServicesField(siblings):svcPriceBlock;
-  return '<div class="field"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>'+
+  // NEW booking defaults to a NEW client (that's how most jobs get booked — door knocks).
+  // The existing-client picker hides behind a link for the rare rebook. Editing an existing
+  // job, or arriving with a preset customer (lead card / profile), keeps the picker as before.
+  const custBlock=(j||selCid)
+    ?'<div class="field"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>'
+    :'<div id="jf-newwrap">'+
+       '<div class="field"><label>Name *</label><input id="jf-name" type="text" placeholder="New client"></div>'+
+       '<div class="grid2">'+
+         '<div class="field"><label>Phone</label><input id="jf-phone" type="tel"></div>'+
+         '<div class="field"><label>Address</label><input id="jf-street" type="text"></div>'+
+       '</div>'+
+       '<div class="hint" style="margin:-6px 0 12px"><a id="jf-pickexisting" style="color:var(--brand);cursor:pointer">Existing client instead…</a></div>'+
+     '</div>'+
+     '<div class="field" id="jf-custwrap" style="display:none"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>';
+  return custBlock+
     svcField+
     '<div class="grid3">'+
       '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
@@ -1689,7 +1706,23 @@ function saveJobBtn(){
     closeModal("job-overlay");render();toast("Job saved","ok");
     return;
   }
-  const cid=+$("#jf-cust").value||null;
+  const closerVal=$("#jf-closer").value;
+  const closerId=closerVal?+closerVal:null;
+  // Default mode is a brand-new client (jf-newwrap visible). "Existing client instead…" hides it
+  // and falls back to the picker. A typed name always creates; no name = must have picked someone.
+  let cid=+$("#jf-cust").value||null;
+  const nw=$("#jf-newwrap");
+  const newMode=nw&&(!nw.style||nw.style.display!=="none");
+  if(newMode){
+    const name=($("#jf-name").value||"").trim();
+    if(name){
+      const nc=Object.assign({id:db.seqC++,name:"",phone:"",email:"",street:"",city:"Toronto",lat:null,lng:null,
+        stage:"won",source:"Door-to-door",tags:[],notes:"",log:[],createdAt:Date.now(),ownerId:1,followup:""},
+        {name,phone:($("#jf-phone").value||"").trim(),street:($("#jf-street").value||"").trim(),
+         ownerId:closerId||1,log:[{t:Date.now(),m:"Booked"}]});
+      db.customers.push(nc);save();cid=nc.id;
+    }else if(!cid){toast("Name is required","err");return;}
+  }
   if(!cid){toast("Pick a customer for this job","err");return;}
   const data={
     customerId:cid,
@@ -1701,8 +1734,6 @@ function saveJobBtn(){
     notes:($("#jf-notes").value||"").trim(),
     crewIds:[], // crew field removed from the form
   };
-  const closerVal=$("#jf-closer").value;
-  const closerId=closerVal?+closerVal:null;
   data.closerId=closerId;
   data.commissionPct=closerId?userRate(closerId):0; // a brand-new job has no history to preserve
   createJob(data);
@@ -1832,6 +1863,12 @@ function openJob(id,preset){
   };
   const svc=$("#jf-service"); // absent in slot mode — the Services field has no single service/price pair
   if(svc)svc.onchange=()=>{const o=svc.selectedOptions[0];if(o&&o.dataset.price)$("#jf-price").value=o.dataset.price;};
+  const pick=$("#jf-pickexisting"); // new-booking default is a new client; this swaps to the picker
+  if(pick)pick.onclick=()=>{
+    const nw=$("#jf-newwrap"),cw=$("#jf-custwrap");
+    if(nw&&nw.style)nw.style.display="none";
+    if(cw&&cw.style)cw.style.display="";
+  };
   bindSvcField(); // slot mode only — no-op when #jf-svcfield isn't in the form
   const sv=$("#jf-save");if(sv)sv.onclick=saveJobBtn; // only rendered for a NEW job (jobFoot)
   const del=$("#jf-delete");if(del)del.onclick=()=>{
