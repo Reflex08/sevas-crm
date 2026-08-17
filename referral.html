@@ -123,6 +123,17 @@ function submit(d){
   if(!first||!phone){errEl.textContent="Please fill in your first name and phone number.";return;}
   errEl.textContent="";
   var msg="Referral from "+d.ref+": "+first+(last?" "+last:"")+", "+phone+(addr?", "+addr:"");
+  // Automatic written copy to the business inbox — same channel as booking confirmations.
+  try{
+    fetch("https://formsubmit.co/ajax/info@sevasservices.com",{method:"POST",
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      body:JSON.stringify({
+        _subject:"REFERRAL — "+first+(last?" "+last:"")+" (from "+d.ref+")",
+        _template:"table",
+        referred_by:d.ref,name:first+(last?" "+last:""),phone:phone,address:addr||"—",
+        they_get:"$"+d.tg,you_get:"$"+d.yg,received_at:new Date().toString()
+      })}).catch(function(){});
+  }catch(e){}
   if(d.ph){
     document.getElementById("cta-area").innerHTML=
       '<div class="confirmed">'+
