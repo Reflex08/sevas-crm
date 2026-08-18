@@ -3080,14 +3080,15 @@ function blastBody(body,c){
     .replace(/\{(?:company|company_name)\}/gi,(db.settings.business||{}).name||"")
     .replace(/\{referral_link\}/gi,referralLink(c.id)||"");
 }
-function blastPhoneClients(){return db.customers.filter(c=>cleanNum(c.phone));}
+function blastPhoneClients(){return db.customers.filter(c=>cleanNum(c.phone)&&c.stage!=="lost");} // lost clients never get texted
 function blastClients(){ // the phoned list, narrowed by the search box
   const q=blastState.q.trim().toLowerCase();
   return blastPhoneClients().filter(c=>!q||(c.name||"").toLowerCase().includes(q)||
     (c.street||"").toLowerCase().includes(q)||(c.phone||"").toLowerCase().includes(q));
 }
 function openBlast(){
-  blastState={tpl:"review",body:BLAST_REVIEW_DEFAULT,q:"",selected:new Set(),step:"compose",sent:new Set()};
+  // referral is the default template (owner order); its body edits live in Settings, not here
+  blastState={tpl:"referral",body:blastTplBody("referral"),q:"",selected:new Set(),step:"compose",sent:new Set()};
   paintBlast();
   openModal("blast-overlay");
 }
@@ -3099,11 +3100,12 @@ function blastClientRow(c){
 }
 function blastComposerHtml(){
   const st=blastState;
-  const opts=[["review","Review request"],["referral","Referral"],["custom","Custom"]]
+  const opts=[["referral","Referral"],["review","Review request"],["custom","Custom"]]
     .map(([v,l])=>'<option value="'+v+'"'+(st.tpl===v?" selected":"")+'>'+l+'</option>').join("");
   const rows=blastClients().map(blastClientRow).join("");
+  // body textarea only for Custom — canned templates are edited in their own menus, not here
   return '<div class="field"><label>Message</label><select id="bl-tpl">'+opts+'</select></div>'+
-    '<div class="field"><textarea id="bl-body" rows="4">'+esc(st.body)+'</textarea></div>'+
+    (st.tpl==="custom"?'<div class="field"><textarea id="bl-body" rows="4">'+esc(st.body)+'</textarea></div>':'')+
     '<div class="sec"><span id="bl-count">'+st.selected.size+' selected</span></div>'+
     '<div class="field"><input id="bl-q" type="search" placeholder="Name, street, phone…" value="'+esc(st.q)+'"></div>'+
     '<div class="toolbar"><button class="btn sm" id="bl-all">All</button>'+
@@ -3126,7 +3128,8 @@ function paintBlastList(){ // repaints the checkbox list + live count only — t
 function updateBlastCount(){
   const n=blastState.selected.size;
   const cnt=$("#bl-count");if(cnt)cnt.textContent=n+" selected";
-  const start=$("#bl-start");if(start)start.disabled=!n;
+  // the Start button lives in the modal foot — its (n) label must track selection live too
+  const start=$("#bl-start");if(start){start.disabled=!n;start.textContent="Start ("+n+")";}
 }
 /* One row per selected client: name, a truncated personalized preview, one deliberate Send tap. */
 function blastSendRow(c){
@@ -3163,7 +3166,8 @@ function paintBlast(){
     return;
   }
   $("#bl-tpl").onchange=e=>{st.tpl=e.target.value;st.body=blastTplBody(st.tpl);paintBlast();};
-  $("#bl-body").addEventListener("input",e=>{st.body=e.target.value;if(st.tpl==="custom")blastCustomBody=st.body;});
+  const bodyEl=$("#bl-body"); // only rendered for the Custom template
+  if(bodyEl)bodyEl.addEventListener("input",e=>{st.body=e.target.value;if(st.tpl==="custom")blastCustomBody=st.body;});
   const q=$("#bl-q");
   q.addEventListener("input",e=>{st.q=e.target.value;paintBlastList();});
   $("#bl-all").onclick=()=>{blastPhoneClients().forEach(c=>st.selected.add(c.id));paintBlastList();};
