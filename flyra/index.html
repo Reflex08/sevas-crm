@@ -840,6 +840,7 @@ function normalize(r){
     if(!Array.isArray(c.tags))c.tags=[];
     if(!Array.isArray(c.log))c.log=[];
     if(!c.stage||!STAGES.some(x=>x.id===c.stage))c.stage="new";
+    if(typeof c.excuse!=="string")c.excuse="";
   });
   r.jobs.forEach(j=>{
     if(!Array.isArray(j.crewIds))j.crewIds=[];
@@ -1696,10 +1697,9 @@ function jobForm(j,preset){
      '<div class="field" id="jf-custwrap" style="display:none"><label>Customer *</label><select id="jf-cust">'+custOpts+'</select></div>';
   return custBlock+
     svcField+
-    '<div class="grid3">'+
+    '<div class="grid2">'+
       '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
       '<div class="field"><label>Time</label><input id="jf-time" type="time" value="'+esc(time)+'"></div>'+
-      '<div class="field"><label>Duration (min)</label><input id="jf-dur" type="number" min="15" step="15" value="'+(j?(j.durMin||60):60)+'"></div>'+
     '</div>'+
     closerBlock+
     '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
@@ -1795,7 +1795,7 @@ function saveJobBtn(){
     price:+$("#jf-price").value||0,
     date:$("#jf-date").value||today(),
     time:$("#jf-time").value||"",
-    durMin:+$("#jf-dur").value||60,
+    durMin:60, // Duration field removed from the form — every visit books as a standard hour
     notes:($("#jf-notes").value||"").trim(),
     crewIds:[], // crew field removed from the form
   };
@@ -1835,7 +1835,7 @@ function autoSaveJob(){
     // the visit, then applySlotServices reconciles the checkbox rows (create/update/delete).
     const date=$("#jf-date").value||today();
     const time=$("#jf-time").value||"";
-    const durMin=+$("#jf-dur").value||60;
+    const durMin=(curJob&&curJob.durMin)||60; // no Duration field — keep what the job already has
     const notes=($("#jf-notes").value||"").trim();
     const closerSel=$("#jf-closer");
     const closerVal=closerSel?closerSel.value:"";
@@ -1869,7 +1869,7 @@ function autoSaveJob(){
     price:+$("#jf-price").value||0,
     date:$("#jf-date").value||today(),
     time:$("#jf-time").value||"",
-    durMin:+$("#jf-dur").value||60,
+    durMin:(curJob&&curJob.durMin)||60, // no Duration field — keep what the job already has
     notes:($("#jf-notes").value||"").trim(),
   };
   // A split job has no closer/commission select on the form (jobForm) — skip those fields
@@ -1993,7 +1993,7 @@ function openJob(id,preset){
 // blur/change, so an existing job's edits persist without a Save button. New jobs (editJob
 // null) fall through untouched; the ✕-remove/＋Add-service slot actions call autoSaveJob directly
 // (bindSvcField) since those are clicks, not change events.
-const AUTOSAVE_FIELDS=["jf-cust","jf-service","jf-price","jf-date","jf-time","jf-dur","jf-closer","jf-notes"];
+const AUTOSAVE_FIELDS=["jf-cust","jf-service","jf-price","jf-date","jf-time","jf-closer","jf-notes"];
 $("#job-body").addEventListener("change",e=>{
   const t=e.target;if(!t)return;
   // Fixing a flagged field clears its red mark + the "Missing:" line right away.
@@ -2104,6 +2104,9 @@ function completeSlot(customerId,date,time){
    STAGES is the pipeline order — ‹ › walk it one step at a time. */
 /* Canonical lead sources (owner's list) — where a client actually came from. */
 const LEAD_SOURCES=["Door-to-door","Meta Ads","Google Ads","Referral","Website","Word of mouth","Repeat customer","Other"];
+// Common objections — suggestions under the free-text Excuse field on a lead
+const LEAD_EXCUSES=["Has to talk to the wife","Has to talk to the husband","Wants to think about it",
+  "Discussing with family","Call back later","Price too high","Maybe next season"];
 const SORTS=[["new","Newest"],["name","Name A–Z"],["value","Value: high → low"]];
 const LIST={leads:{filter:"all",q:"",searchOpen:false,sort:"new",page:0,size:25},
             customers:{filter:"won",q:"",searchOpen:false,sort:"new",page:0,size:25}};
@@ -2114,7 +2117,7 @@ const PILLSEL="border-radius:999px;padding:5px 11px;background:#0d0e12;border:1p
 /* --- customer data ops (the modals call these, so the gate drives the same code path) --- */
 function createCust(data){
   const c=Object.assign({id:db.seqC++,name:"",phone:"",email:"",street:"",city:"Toronto",lat:null,lng:null,
-    stage:"new",source:"Door-to-door",tags:[],notes:"",createdAt:Date.now(),ownerId:(activeUsers()[0]||db.users[0]||{}).id||1,followup:""},
+    stage:"new",source:"Door-to-door",excuse:"",tags:[],notes:"",createdAt:Date.now(),ownerId:(activeUsers()[0]||db.users[0]||{}).id||1,followup:""},
     data,{log:[{t:Date.now(),m:"Lead created."}]});
   db.customers.push(c);save();return c;
 }
@@ -2151,10 +2154,10 @@ function custMatches(c,q){q=q.toLowerCase();
 function leadRows(){
   const st=LS();
   let list=db.customers.slice();
-  // Leads = the pipeline: interested, no confirmed booking. A Won client is NOT a lead — they
-  // live on the Clients screen. "All" on the Leads screen means all PIPELINE stages.
-  if(st.filter==="all"&&listScreen==="leads")list=list.filter(c=>c.stage!=="won");
-  else if(st.filter!=="all")list=list.filter(c=>c.stage===st.filter);
+  // Leads = interested, no confirmed booking. Clients = paid (won). Lost is out of sight on
+  // both — one flat section per screen, no pipeline sub-lists, no filter dropdown.
+  if(listScreen==="leads")list=list.filter(c=>c.stage!=="won"&&c.stage!=="lost");
+  else list=list.filter(c=>c.stage==="won");
   if(st.q)list=list.filter(c=>custMatches(c,st.q));
   const cmp={
     "new":(a,b)=>(b.createdAt||0)-(a.createdAt||0)||a.name.localeCompare(b.name),
@@ -2163,24 +2166,22 @@ function leadRows(){
   return list.sort(cmp[st.sort]||cmp["new"]);
 }
 function leadCard(c){
-  const i=STAGES.findIndex(s=>s.id===c.stage),val=custValue(c.id),rep=userById(c.ownerId);
-  const arrow=(d,ch,attr)=>'<button class="lc-arrow"'+
-    ((i>=0&&i+d>=0&&i+d<STAGES.length)?' data-'+attr+'="'+c.id+'"':' disabled style="opacity:.3"')+
-    ' aria-label="'+(d<0?"Previous":"Next")+' stage">'+ch+'</button>';
-  let pills=(c.tags||[]).slice(0,2).map(t=>'<span class="ph-pill" style="margin-top:0">'+esc(t)+'</span>').join("");
+  const rep=userById(c.ownerId),isLead=listScreen==="leads";
+  let pills="";
+  // the lead's excuse ("talk to the wife", "thinking about it") leads the pill row
+  if(isLead&&c.excuse)pills+='<span class="lchip" style="background:#c9850026;color:#e8b04b" title="Their excuse">'+esc(c.excuse)+'</span>';
+  pills+=(c.tags||[]).slice(0,2).map(t=>'<span class="ph-pill" style="margin-top:0">'+esc(t)+'</span>').join("");
   if(c.followup){const d=Math.round((new Date(c.followup+"T00:00:00")-new Date(today()+"T00:00:00"))/864e5);
     pills+='<span class="lchip" title="Follow-up '+esc(c.followup)+'">'+(d>0?d+"d":"due")+'</span>';}
   if(rep){const col=rep.color||avatarColor(rep.name);
     pills+='<span class="lchip" style="background:'+esc(col)+'26;color:'+esc(col)+'" title="'+esc(rep.name)+'">'+esc(initials(rep.name))+'</span>';}
   return '<div class="lead-card" data-cust="'+c.id+'">'+
-    arrow(-1,"‹","stageback")+
     '<div class="avatar" style="background:'+avatarColor(c.name)+'">'+esc(initials(c.name))+'</div>'+
     '<div class="lc-mid"><div class="nm">'+esc(c.name)+'</div>'+
       (c.phone?'<div><span class="ph-pill">'+esc(fmtPhone(c.phone))+'</span></div>':'')+
       (pills?'<div class="lc-tags">'+pills+'</div>':'')+
     '</div>'+
-    '<div class="lc-right">'+(val>0?'<span class="lchip">'+esc(money(val))+'</span>':'')+'</div>'+
-    arrow(1,"›","stagefwd")+
+    (isLead?'<button class="lc-arrow" data-leadwon="'+c.id+'" title="Became a client">✓</button>':'')+
   '</div>';
 }
 /* Repaint just the list + footer — the search box keeps focus while typing. */
@@ -2190,17 +2191,7 @@ function paintLeadRows(){
   const all=leadRows(),pages=Math.max(1,Math.ceil(all.length/st.size));
   st.page=Math.min(Math.max(st.page,0),pages-1);
   const page=all.slice(st.page*st.size,(st.page+1)*st.size);
-  list.innerHTML=page.length?STAGES.map(s=>{
-    const rows=page.filter(c=>c.stage===s.id);
-    if(!rows.length)return"";
-    const tot=rows.reduce((n,c)=>n+custValue(c.id),0);
-    return '<div class="lead-grp"><div class="lg-head">'+
-      '<span class="lg-bar" style="background:'+s.color+'"></span>'+
-      '<div><div class="lg-label">'+esc(s.label)+'</div>'+
-        '<div class="lg-count">'+rows.length+' '+noun+(rows.length===1?"":"s")+'</div></div>'+
-      '<span class="lg-total">'+esc(money(tot))+'</span></div>'+
-      rows.map(leadCard).join("")+'</div>';
-  }).join("")
+  list.innerHTML=page.length?'<div class="lead-grp">'+page.map(leadCard).join("")+'</div>'
    :'<div class="panel"><div class="panel-pad empty"><div class="big">🌱</div>'+
     '<div class="et">'+(st.q?"No one matches that search":"Nothing here yet")+'</div>'+
     '<div style="margin-top:14px"><button class="btn btn-primary" id="lead-empty-add">＋ New lead</button></div></div></div>';
@@ -2210,8 +2201,9 @@ function paintLeadRows(){
   $("#lead-foot").innerHTML='<span class="lead-total">'+all.length+' total '+noun+(all.length===1?"":"s")+'</span>'+
     '<button class="fpill" id="lead-pagesize" title="Rows per page">'+st.size+' | page</button>'+pager;
   document.querySelectorAll("[data-cust]").forEach(el=>el.onclick=()=>openCustProfile(+el.dataset.cust));
-  document.querySelectorAll("[data-stageback]").forEach(b=>b.onclick=e=>{e.stopPropagation();custStageMove(+b.dataset.stageback,-1);});
-  document.querySelectorAll("[data-stagefwd]").forEach(b=>b.onclick=e=>{e.stopPropagation();custStageMove(+b.dataset.stagefwd,1);});
+  document.querySelectorAll("[data-leadwon]").forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const c=custById(+b.dataset.leadwon);setStage(+b.dataset.leadwon,"won");render();
+    toast((c?c.name:"Lead")+" → Clients","ok");});
   document.querySelectorAll("[data-lpage]").forEach(b=>b.onclick=()=>{st.page+=+b.dataset.lpage;paintLeadRows();});
   const ps=$("#lead-pagesize");if(ps)ps.onclick=()=>{st.size={25:50,50:100}[st.size]||25;st.page=0;paintLeadRows();};
   const ea=$("#lead-empty-add");if(ea)ea.onclick=()=>openCustEdit(null);
@@ -2219,17 +2211,10 @@ function paintLeadRows(){
 function renderLeadScreen(screen){
   listScreen=screen;
   const st=LS();
-  const opts=screen==="leads"
-    ?[["all","Leads"]].concat(STAGES.map(s=>[s.id,s.label]))
-    :[["won","Clients"],["all","All clients"]];
-  const label=(opts.find(o=>o[0]===st.filter)||opts[0])[1];
   const searching=st.searchOpen||!!st.q;
   $("#content").innerHTML=
     '<div class="lx-bar">'+
-      '<div class="lx-title">'+esc(label)+' <span class="lx-chev">⌄</span>'+
-        '<select id="lead-stage" aria-label="Filter by stage">'+
-          opts.map(([v,l])=>'<option value="'+esc(v)+'"'+(st.filter===v?" selected":"")+'>'+esc(l)+'</option>').join("")+
-        '</select></div>'+
+      '<div class="lx-title" style="cursor:default">'+(screen==="leads"?"Leads":"Clients")+'</div>'+
       '<button class="fcir" id="lead-search-btn" title="Search" style="margin-left:auto">⌕</button>'+
       '<button class="fcir" id="lead-sort-btn" title="Sort">☰</button>'+
       '<button class="fcir" id="lead-add" title="New lead">＋</button>'+
@@ -2241,7 +2226,6 @@ function renderLeadScreen(screen){
   if(searching){const s=$("#lead-q");s.value=st.q;
     s.addEventListener("input",e=>{st.q=e.target.value;st.page=0;paintLeadRows();});s.focus();}
   paintLeadRows();
-  $("#lead-stage").onchange=e=>{st.filter=e.target.value;st.page=0;renderLeadScreen(screen);};
   $("#lead-search-btn").onclick=()=>{st.searchOpen=!st.searchOpen;if(!st.searchOpen)st.q="";renderLeadScreen(screen);};
   $("#lead-sort-btn").onclick=()=>{const i=SORTS.findIndex(x=>x[0]===st.sort),nx=SORTS[(i+1)%SORTS.length];
     st.sort=nx[0];renderLeadScreen(screen);toast("Sorted: "+nx[1]);};
@@ -2349,10 +2333,7 @@ function custForm(c){
       '<div class="field"><label>Street</label><input id="ce-street" value="'+val("street")+'"></div>'+
       '<div class="field"><label>City</label><input id="ce-city" value="'+esc(c?(c.city||""):"Toronto")+'"></div>'+
     '</div>'+
-    '<div class="grid3">'+
-      '<div class="field"><label>Stage</label><select id="ce-stage">'+
-        STAGES.map(s=>'<option value="'+s.id+'"'+(c&&c.stage===s.id?" selected":"")+'>'+esc(s.label)+'</option>').join("")+
-      '</select></div>'+
+    '<div class="grid2">'+
       '<div class="field"><label>Source</label><select id="ce-source">'+
         (()=>{const cur=c?(c.source||"Door-to-door"):"Door-to-door";
           const list=LEAD_SOURCES.slice();if(cur&&!list.includes(cur))list.push(cur); // legacy values stay selectable
@@ -2362,6 +2343,9 @@ function custForm(c){
         userOptList(c?c.ownerId:null).map(u=>'<option value="'+u.id+'"'+(c&&c.ownerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("")+
       '</select></div>'+
     '</div>'+
+    '<div class="field"><label>Excuse (why not booked yet)</label>'+
+      '<input id="ce-excuse" list="ce-excuse-opts" value="'+val("excuse")+'" placeholder="Has to talk to the wife…">'+
+      '<datalist id="ce-excuse-opts">'+LEAD_EXCUSES.map(x=>'<option value="'+esc(x)+'">').join("")+'</datalist></div>'+
     '<div class="grid2">'+
       '<div class="field"><label>Tags</label><input id="ce-tags" value="'+esc((c&&c.tags||[]).join(", "))+'" placeholder="Repeat, Big house">'+
         '<div class="hint">Comma separated.</div></div>'+
@@ -2386,8 +2370,9 @@ function openCustEdit(id){
       email:($("#ce-email").value||"").trim(),
       street:($("#ce-street").value||"").trim(),
       city:($("#ce-city").value||"").trim(),
-      stage:$("#ce-stage").value,
+      stage:c?c.stage:"new", // no Stage dropdown — new leads start at "new", ✓/Mark lost move them
       source:($("#ce-source").value||"").trim(),
+      excuse:($("#ce-excuse").value||"").trim(),
       ownerId:+$("#ce-rep").value||(activeUsers()[0]||db.users[0]||{}).id||1,
       tags:($("#ce-tags").value||"").split(",").map(t=>t.trim()).filter(Boolean),
       followup:$("#ce-followup").value||"",
@@ -3011,19 +2996,18 @@ function dismissMsg(id){
 }
 
 /* --- screen --- */
-function msgRow(m,off){
+function msgRow(m){
   const c=custById(m.customerId),k=kindMeta(m.kind);
-  return '<div class="msg-row'+(off?" off":"")+'">'+
+  return '<div class="msg-row">'+
     '<div class="mb">'+
       '<div class="nm">'+esc(c?c.name:"(deleted customer)")+
         ' <span class="badge '+k.cls+'">'+esc(k.label)+'</span></div>'+
       '<div class="qnotes">'+esc(m.body)+'</div>'+
-      (off?'<div class="msg-why">Handed off '+esc(fmtWhen(m.t))+'</div>'
-        :(m.why?'<div class="msg-why">'+esc(m.why)+'</div>':''))+
+      (m.why?'<div class="msg-why">'+esc(m.why)+'</div>':'')+
     '</div>'+
-    (off?'':'<div class="msg-acts">'+
+    '<div class="msg-acts">'+
       '<button class="btn sm btn-primary" data-msend="'+m.id+'">💬 Send</button>'+
-      '<button class="btn sm btn-ghost" data-mdel="'+m.id+'" title="Dismiss — won’t be queued again">✕</button></div>')+
+      '<button class="btn sm btn-ghost" data-mdel="'+m.id+'" title="Dismiss — won’t be queued again">✕</button></div>'+
   '</div>';
 }
 function msgTplCard(){
@@ -3034,32 +3018,15 @@ function msgTplCard(){
     '<div class="hint">These fill in when a draft is queued. Saved when you click away.</div>'+
   '</div></div>';
 }
-function msgAutoCard(){
-  const a=db.settings.automation;
-  return '<div class="panel"><h2>Automation rules</h2><div class="panel-pad">'+
-    '<div class="grid2">'+
-      '<div class="field"><label>Follow up every (days)</label>'+
-        '<input id="au-every" type="number" min="1" max="60" value="'+(+a.followupEveryDays||3)+'"></div>'+
-      '<div class="field"><label>Max follow-up tries</label>'+
-        '<input id="au-max" type="number" min="0" max="20" value="'+(+a.followupMaxTries||0)+'"></div>'+
-    '</div>'+
-    '<label class="crew-chk"><input type="checkbox" id="au-review"'+(a.reviewAskAfterDone?" checked":"")+
-      '> Ask for a review after a job is done</label>'+
-    '<div class="field" style="margin-top:13px"><label>Review link (optional)</label>'+
-      '<input id="au-link" value="'+esc(a.reviewLink||"")+'" placeholder="Paste your Google review link"></div>'+
-    '<div class="note"><b>Nothing sends itself.</b> The rules only queue drafts — a file on your '+
-      'phone cannot text anyone. Every message waits for you to tap Send.</div>'+
-  '</div></div>';
-}
+/* Owner decluttered this screen: no Automation rules card (the rules run on app open with the
+   stored settings — knobs were never touched), no Handed-off history card, no Run button. */
 function renderMessages(){
   const t=today();
   const q=queuedMessages().slice().sort((x,y)=>x.dueAt<y.dueAt?-1:x.dueAt>y.dueAt?1:x.id-y.id);
   const due=q.filter(m=>m.dueAt<=t),later=q.filter(m=>m.dueAt>t);
-  const off=db.messages.filter(m=>m.status==="handed-off").slice().sort((x,y)=>(y.t||0)-(x.t||0)).slice(0,10);
   $("#content").innerHTML=
     '<div class="lx-bar"><div class="lx-title" style="cursor:default">Messages</div>'+
-      (isRep()?"":'<button class="mpill" id="msg-blast" style="margin-left:auto">📣 Text blast</button>')+
-      '<button class="mpill" id="msg-run"'+(isRep()?' style="margin-left:auto"':'')+'>⚡ Run automations</button></div>'+
+      (isRep()?"":'<button class="mpill" id="msg-blast" style="margin-left:auto">📣 Text blast</button>')+'</div>'+
     '<div class="lead-total" style="margin:0 0 14px">Queued — tap to send. Nothing goes out on its own.</div>'+
     '<div class="panel"><h2>Outbox<span class="pill">'+q.length+' queued</span></h2><div class="panel-pad">'+
       (q.length?
@@ -3069,12 +3036,7 @@ function renderMessages(){
         :'<div class="empty" style="padding:26px 12px"><div class="big">✓</div>'+
           '<div class="et">Outbox clear ✓</div><div class="es">Nothing is waiting to go out.</div></div>')+
     '</div></div>'+
-    (off.length?'<div class="panel"><h2>Handed off<span class="pill">last '+off.length+'</span></h2>'+
-      '<div class="panel-pad">'+off.map(m=>msgRow(m,true)).join("")+'</div></div>':'')+
-    msgTplCard()+msgAutoCard();
-  $("#msg-run").onclick=()=>{
-    const n=runAutomations();stampAutoRun();render();
-    toast(n?("Queued "+n+" draft"+(n===1?"":"s")+" — tap to send"):"Nothing new to queue","ok");};
+    msgTplCard();
   const blastBtn=$("#msg-blast");if(blastBtn)blastBtn.onclick=openBlast;
   document.querySelectorAll("[data-msend]").forEach(b=>b.onclick=()=>sendMsg(+b.dataset.msend));
   document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{
@@ -3446,33 +3408,6 @@ function breakdownCard(title,rows,nameOf){
       :'<div class="es" style="font-style:italic;color:var(--faint)">Nothing collected yet this year.</div>')+
   '</div></div>';
 }
-/* The leak finder. Each row is money the business already earned but has not banked —
-   or a promise the calendar has quietly dropped. */
-function leakRows(){
-  const now=Date.now(),cut=now-7*86400000;
-  const touched=c=>(c.log&&c.log.length?+c.log[c.log.length-1].t:0)||+c.createdAt||0;
-  const stale=db.customers.filter(c=>c.stage==="quoted"&&touched(c)<cut);
-  const lost=db.customers.filter(c=>c.stage==="lost"&&new Date(touched(c)).getFullYear()===curYear());
-  const unsched=db.plans.filter(p=>p.status==="active"&&!db.jobs.some(j=>j.planId===p.id&&j.status==="scheduled"));
-  return [
-    {id:"stale",label:"Stale quotes",hint:"quoted, untouched for over 7 days",view:"leads",
-     count:stale.length,amount:stale.reduce((s,c)=>s+custValue(c.id),0)},
-    {id:"lost",label:"Lost this year",hint:"estimated value that walked away",view:"",
-     count:lost.length,amount:lost.reduce((s,c)=>s+custValue(c.id),0)},
-    {id:"unsched",label:"Unscheduled active plans",hint:"every active plan should have its next visit booked",
-     view:"plans",count:unsched.length,amount:unsched.reduce((s,p)=>s+(+p.perVisit||0),0)},
-  ];
-}
-function leakRow(l){
-  const clean=l.count===0,link=!!l.view&&!clean;
-  return '<div class="jobline" data-leak="'+esc(l.id)+'"'+(link?' data-leakview="'+esc(l.view)+'"':' style="cursor:default"')+'>'+
-    '<div style="flex:1;min-width:0"><div class="nm">'+esc(l.label)+'</div>'+
-      '<div class="sub">'+esc(l.hint)+'</div></div>'+
-    (clean?'<span class="badge b-won">✓ clean</span>'
-      :'<div style="text-align:right"><div class="money owe">'+esc(money2(l.amount))+'</div>'+
-        '<div class="sub">'+l.count+' item'+(l.count!==1?"s":"")+'</div></div>')+
-  '</div>';
-}
 /* ---------------- Reports: Jobs + Plans tabs ----------------
    Overview is untouched — renderReportsOverview() below is the old renderReports() body, byte-for-
    byte, just returning its markup instead of calling shell() directly. Jobs/Plans are new: their
@@ -3812,10 +3747,7 @@ function renderReportsOverview(){
         '</div></div>'+
     '</div></div>'+
     breakdownCard("By service",svc,k=>String(k))+
-    breakdownCard("By rep",reps,k=>{const u=userById(k);return u?u.name:"Unassigned";})+
-    '<div class="panel"><h2>Leak finder</h2><div class="panel-pad">'+
-      leakRows().map(leakRow).join("")+
-    '</div></div>';
+    breakdownCard("By rep",reps,k=>{const u=userById(k);return u?u.name:"Unassigned";});
 }
 function renderReports(){
   const inner=reportTab==="jobs"?renderReportsJobs():reportTab==="plans"?renderReportsPlans():renderReportsOverview();
@@ -3835,7 +3767,6 @@ function renderReports(){
       plansCSV(db.plans.filter(p=>repPlanFilter==="all"||p.status==="active")));
   });
   if(reportTab==="plans")document.querySelectorAll("[data-repplan]").forEach(el=>el.onclick=()=>openPlan(+el.dataset.repplan));
-  if(reportTab==="overview")document.querySelectorAll("[data-leakview]").forEach(el=>el.onclick=()=>setView(el.dataset.leakview));
   if(reportTab==="jobs"){wireDonutHover("jobs-src");wireDonutHover("jobs-svc");}
   if(reportTab==="plans")wireDonutHover("plans-freq");
   bindChartTips();
