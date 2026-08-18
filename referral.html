@@ -88,6 +88,14 @@ function parseData(){
     tg:+d.tg,yg:+d.yg,gc:isFinite(+d.gc)?+d.gc:0
   };
 }
+/* 10-digit numbers behind "sms:+" parse as a foreign country code and text a stranger —
+   normalize North-American numbers to +1AAANNNNNNN; odd lengths ship as bare digits. */
+function smsNum(p){
+  var d=String(p||"").replace(/[^\d]/g,"");
+  if(d.length===10)return "+1"+d;
+  if(d.length===11&&d.charAt(0)==="1")return "+"+d;
+  return d;
+}
 function fmtDollar(n){n=+n||0;return "$"+(n%1?n.toFixed(2):n);}
 function render(){
   var d=parseData();
@@ -143,7 +151,7 @@ function submit(d){
         '<div class="headline">Thanks &mdash; referral sent!</div>'+
         '<div class="note">A confirmation text is opening &mdash; please press send.</div>'+
       '</div>';
-    location.href="sms:+"+d.ph+"?&body="+encodeURIComponent(msg);
+    location.href="sms:"+smsNum(d.ph)+"?&body="+encodeURIComponent(msg);
   }else{
     showCopyFallback(msg);
   }

@@ -529,6 +529,15 @@ function firstName(n){return (n||"").trim().split(/\s+/)[0]||"";}
 function avatarColor(name){name=name||"";let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);
   const c=["#38bdf8","#34d399","#a78bfa","#fbbf24","#fb7185","#5ac8fa","#f472b6","#a3e635"];return c[Math.abs(h)%c.length];}
 function cleanNum(p){return (p||"").replace(/[^\d+]/g,"");}
+/* The ONLY way an sms:/tel: number gets built. A bare 10-digit number behind "sms:+" parses as a
+   foreign country code (+416… = not Toronto) and texts a stranger — so North-American numbers are
+   normalized to full +1AAANNNNNNN, and anything odd ships as bare digits with no "+" guess. */
+function smsNum(p){
+  const d=(p||"").replace(/[^\d]/g,"");
+  if(d.length===10)return "+1"+d;
+  if(d.length===11&&d[0]==="1")return "+"+d;
+  return d;
+}
 function fmtPhone(p){const d=(p||"").replace(/[^\d]/g,"");
   if(d.length===10)return "("+d.slice(0,3)+") "+d.slice(3,6)+"-"+d.slice(6);
   if(d.length===11&&d[0]==="1")return "("+d.slice(1,4)+") "+d.slice(4,7)+"-"+d.slice(7);
@@ -713,7 +722,7 @@ const DEFAULT_SETTINGS=()=>({
     "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
     "Confirming this booking means you've read and agree to these terms."},
   referral:{theyGet:50,youGet:50,giftCard:0,sendWhen:"done",
-    template:"Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, send them this link — when they book, you both get a reward: {referral_link}"},
+    template:"Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, tap the link below and pop in their info — when they book, you both get a reward: {referral_link}"},
 });
 const SIG_STUB="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -826,8 +835,10 @@ function normalize(r){
   // Only the known legacy pairs move; an owner-typed custom amount is never touched.
   {const tg=+s.referral.theyGet,yg=+s.referral.youGet;
    if((tg===50&&yg===25)||(tg===25&&yg===50)||(tg===25&&yg===25)){s.referral.theyGet=50;s.referral.youGet=50;}}
-  // migrate the old terse default to the friendlier one — only if the owner never customized it
-  if(s.referral.template==="Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}")
+  // migrate the older defaults to the current wording — only if the owner never customized it
+  // (v1 said "send them this link", but the link is the CLIENT'S form, not something to forward)
+  if(s.referral.template==="Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}"
+   ||s.referral.template==="Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, send them this link — when they book, you both get a reward: {referral_link}")
     s.referral.template=d.referral.template;
   s.referral.theyGet=isFinite(+s.referral.theyGet)?Math.max(0,+s.referral.theyGet):d.referral.theyGet;
   s.referral.youGet=isFinite(+s.referral.youGet)?Math.max(0,+s.referral.youGet):d.referral.youGet;
@@ -1659,7 +1670,10 @@ function jobForm(j,preset){
          '<div class="field"><label>Phone</label><input id="jf-phone" type="tel"></div>'+
          '<div class="field"><label>Address</label><input id="jf-street" type="text"></div>')+
       svcPriceBlock+
-      '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
+      '<div class="grid2">'+
+        '<div class="field"><label>Date</label><input id="jf-date" type="date" value="'+esc(date)+'"></div>'+
+        '<div class="field"><label>Time</label><input id="jf-time" type="time" value="'+esc(j?(j.time||""):(preset.time||""))+'"></div>'+
+      '</div>'+
       '<div class="field"><label>Notes</label><textarea id="jf-notes">'+(j?esc(j.notes||""):"")+'</textarea></div>';
   }
   const selCid=j?j.customerId:(preset.customerId||null); // "＋ Job" from a lead card preselects them
@@ -1772,7 +1786,7 @@ function saveJobBtn(){
          ownerId:me.id,log:[{t:Date.now(),m:"Booked by "+me.name}]});
       db.customers.push(c);save();
     }else if(!c.ownerId){c.ownerId=me.id;}
-    createJob({customerId:c.id,service,price,date,time:"",durMin:60,crewIds:[],
+    createJob({customerId:c.id,service,price,date,time:(($("#jf-time")||{}).value)||"",durMin:60,crewIds:[],
       closerId:me.id,commissionPct:+me.commissionPct||0,notes});
     closeModal("job-overlay");render();toast("Job saved","ok");
     return;
@@ -1821,14 +1835,15 @@ function autoSaveToast(){if(autoSaveToasted)return;autoSaveToasted=true;toast("S
 function autoSaveJob(){
   if(!editJob)return; // no half-typed ghost client — new jobs only ever persist via Book
   if(isRep()){
-    // Rep editing: only service/price/date/notes change. Who's assigned, who gets the
-    // credit, and the time slot are never read from this form, so updateJob's merge
-    // leaves all of that exactly as it was — a rep can't reassign a job's credit.
+    // Rep editing: only service/price/date/time/notes change. Who's assigned and who gets
+    // the credit are never read from this form, so updateJob's merge leaves all of that
+    // exactly as it was — a rep can't reassign a job's credit.
     const service=$("#jf-service").value||(db.settings.services[0]?db.settings.services[0].name:"");
     const price=+$("#jf-price").value||0;
     const date=$("#jf-date").value||today();
+    const time=(($("#jf-time")||{}).value)||"";
     const notes=($("#jf-notes").value||"").trim();
-    updateJob(editJob,{service,price,date,notes});
+    updateJob(editJob,{service,price,date,time,notes});
     render();autoSaveToast();
     return;
   }
@@ -2300,7 +2315,7 @@ function openCustProfile(id){
         :'<div class="note">Nothing logged yet.</div>'));
   $("#cust-foot").innerHTML=
     (rep?"":'<button class="btn del" id="cp-del">Delete</button>')+'<span class="spacer"></span>'+
-    (c.phone?'<a class="btn" style="text-decoration:none" href="sms:'+esc(cleanNum(c.phone))+'">💬 Text</a>':'')+
+    (c.phone?'<a class="btn" style="text-decoration:none" href="sms:'+esc(smsNum(c.phone))+'">💬 Text</a>':'')+
     (c.stage!=="lost"?'<button class="btn" id="cp-lost">Mark lost</button>':'')+
     '<button class="btn" id="cp-job">＋ Job</button>'+
     '<button class="btn btn-primary" id="cp-close">Close</button>';
@@ -2361,7 +2376,7 @@ function custForm(c){
 }
 function openCustEdit(id){
   const c=id?custById(id):null;
-  $("#cust-title").textContent=c?"Edit lead":"New lead";
+  $("#cust-title").textContent=c?(c.stage==="won"?"Edit client":"Edit lead"):"New lead";
   $("#cust-hsub").textContent=c?c.name:"Everything here is optional except the name.";
   $("#cust-body").innerHTML=custForm(c);
   $("#cust-foot").innerHTML='<span class="spacer"></span>'+
@@ -2657,7 +2672,7 @@ function sendPlanLink(id){
   const ph=c?cleanNum(c.phone):"";
   const body="Hi "+(c?firstName(c.name):"")+", here's your "+(p?p.name:"service")+" plan with "+
     ((db.settings.business||{}).name||"us")+" — review and accept here: "+link;
-  if(ph)location.href="sms:+"+ph+"?&body="+encodeURIComponent(body);
+  if(ph)location.href="sms:"+smsNum(ph)+"?&body="+encodeURIComponent(body);
   else prompt("No phone on file for "+(c?c.name:"this client")+" — copy the link:",link);
 }
 function planFoot(p){
@@ -2793,7 +2808,7 @@ function sendConfirmLink(id){
   const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
   const body="Hi "+(c?firstName(c.name):"")+", please confirm your "+services+" on "+when+
     (addr?" — "+addr:"")+", "+money(total)+". Confirm here: "+link;
-  if(ph)location.href="sms:+"+ph+"?&body="+encodeURIComponent(body);
+  if(ph)location.href="sms:"+smsNum(ph)+"?&body="+encodeURIComponent(body);
   else prompt("No phone on file for "+(c?c.name:"this client")+" — copy the link:",link);
 }
 /* Hosted referral page: same base64url-JSON pattern as confirmLink, one field shorter. Unlike
@@ -2861,7 +2876,7 @@ function textBookingConfirmation(id){
   const body="Hi "+firstName(c.name)+" — confirming your "+j.service+" on "+
     fmtDate(j.date,{weekday:"long",month:"long",day:"numeric"})+(j.time?" at "+fmtTime(j.time):"")+
     " for "+money2(j.price)+". Confirm here: "+link;
-  window.location.href="sms:"+to+"?body="+encodeURIComponent(body);
+  window.location.href="sms:"+smsNum(to)+"?body="+encodeURIComponent(body);
   toast("Messages opened — press send there","ok");
 }
 function openBookingConfirm(id){
@@ -2988,7 +3003,7 @@ function sendMsg(id){
   const m=db.messages.find(x=>x.id===id);if(!m)return;
   const c=custById(m.customerId),to=cleanNum(c&&c.phone);
   if(!to){toast("No phone number on file for this customer","err");return;}
-  window.location.href="sms:"+to+"?body="+encodeURIComponent(m.body);
+  window.location.href="sms:"+smsNum(to)+"?body="+encodeURIComponent(m.body);
   markHandedOff(id);render();
   toast("Messages opened — press send there","ok");
 }
@@ -3158,7 +3173,7 @@ function paintBlast(){
     document.querySelectorAll("[data-bsend]").forEach(b=>b.onclick=()=>{
       const id=+b.dataset.bsend,c=custById(id),to=cleanNum(c&&c.phone);
       if(!c||!to)return;
-      location.href="sms:+"+to+"?&body="+encodeURIComponent(blastBody(st.body,c));
+      location.href="sms:"+smsNum(to)+"?&body="+encodeURIComponent(blastBody(st.body,c));
       st.sent.add(id);
       paintBlast();
     });
