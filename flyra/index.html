@@ -291,8 +291,10 @@
   .modal.lg{max-width:760px} .modal.sm{max-width:520px}
   /* Sticky: the ✕ stays reachable however far the modal scrolls (owner: "I don't wanna scroll
      all the way up just to close"), and the backdrop tap still closes as before. */
+  /* Not sticky — the owner found the following header unprofessional; tap-off close (and ✕ at the
+     top) still make leaving the modal easy without pinning anything over the content. */
   .modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;
-    position:sticky;top:0;background:#15161c;z-index:3;border-radius:20px 20px 0 0}
+    background:#15161c;border-radius:20px 20px 0 0}
   .modal-head h3{margin:0;font-size:18px;font-weight:800}
   .modal-head .hsub{color:var(--muted);font-size:12.5px;font-weight:600;margin-top:2px}
   .x{border:0;background:transparent;font-size:24px;color:var(--faint);line-height:1;padding:2px 7px;border-radius:8px}
