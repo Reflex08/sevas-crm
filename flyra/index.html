@@ -850,7 +850,7 @@ function normalize(r){
   // tombstones: {id,t} per collection so a delete on one device survives a merge with a stale
   // copy from another — only collections a device can actually hard-delete need one.
   if(!r.deleted||typeof r.deleted!=="object")r.deleted={};
-  for(const k of ["jobs","customers","plans","messages","payouts"])
+  for(const k of ["jobs","customers","plans","messages","payouts","users"])
     if(!Array.isArray(r.deleted[k]))r.deleted[k]=[];
   // per-row guards — a hand-edited or older file must never crash a renderer
   r.customers.forEach(c=>{
@@ -1175,7 +1175,8 @@ function render(){
   if(!visibleViews().includes(view))view="dashboard";
   $("#c-msg").textContent=queuedMessages().length;
   document.querySelectorAll("#nav a").forEach(a=>a.classList.toggle("active",a.dataset.view===view));
-  document.body.classList.toggle("no-fab",view==="settings"||view==="reports");
+  // no ＋ on settings/reports (nothing to add), team (payroll — owner order), or messages in rep mode (blast is owner-only)
+  document.body.classList.toggle("no-fab",view==="settings"||view==="reports"||view==="team"||(view==="messages"&&isRep()));
   paintWhoFoot();
   (view==="dashboard"&&isRep()?renderRepHome:VIEWS[view])();
 }
@@ -4107,7 +4108,7 @@ async function syncFetchRemote(id){
    same-id collision on them just falls through to newer-db-wins on that one record — see the
    punted-edge-case note in the gate). Order after that doesn't matter. */
 const MERGE_ORDER=["customers","users","plans","jobs","messages","pins","payouts"];
-const TOMB_COLLS=["jobs","customers","plans","messages","payouts"];
+const TOMB_COLLS=["jobs","customers","plans","messages","payouts","users"]; // users too — a deleted rep must not resurrect from another device's copy
 const SEQ_OF={customers:"seqC",jobs:"seqJ",plans:"seqP",messages:"seqM",payouts:"seqPay",users:"seqU",pins:"seqPin"};
 /* ---- per-record edit stamps ----
    The whole-db updatedAt says which DEVICE saved last, not which RECORD is fresher — resolving a
@@ -4388,7 +4389,13 @@ function drawer(open){$("#drawer").classList.toggle("open",open);$("#drawer-veil
 document.querySelectorAll("#nav a").forEach(a=>a.onclick=()=>{setView(a.dataset.view);drawer(false);});
 $("#menu-btn").onclick=()=>drawer(!$("#drawer").classList.contains("open"));
 $("#drawer-veil").onclick=()=>drawer(false);
-$("#fab-add").onclick=()=>openJob(null);
+/* The big ＋ does the obvious thing for the screen you're on — not "new job" everywhere. */
+$("#fab-add").onclick=()=>{
+  if(view==="messages"){if(!isRep())openBlast();return;}
+  if(view==="plans"){openPlanEdit(null);return;}
+  if(view==="leads"||view==="customers"){openCustEdit(null);return;}
+  openJob(null);
+};
 $("#sync-chip").onclick=syncNow;
 $("#who-btn").onclick=switchUser;
 document.addEventListener("keydown",e=>{
