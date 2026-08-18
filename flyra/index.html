@@ -712,7 +712,7 @@ const DEFAULT_SETTINGS=()=>({
     "5. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
     "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
     "Confirming this booking means you've read and agree to these terms."},
-  referral:{theyGet:25,youGet:25,giftCard:0,sendWhen:"done",
+  referral:{theyGet:50,youGet:50,giftCard:0,sendWhen:"done",
     template:"Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, send them this link — when they book, you both get a reward: {referral_link}"},
 });
 const SIG_STUB="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -822,10 +822,10 @@ function normalize(r){
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
   s.referral=Object.assign({},d.referral,s.referral||{});
-  // one-time migration off the old 50-based defaults — the offer is $25/$25 (only legacy pairs move,
-  // an owner-typed custom amount is never touched)
+  // one-time migration off the older default pairs — owner set the offer to $50/$50 (2026-08-17).
+  // Only the known legacy pairs move; an owner-typed custom amount is never touched.
   {const tg=+s.referral.theyGet,yg=+s.referral.youGet;
-   if((tg===50&&yg===25)||(tg===25&&yg===50)||(tg===50&&yg===50)){s.referral.theyGet=25;s.referral.youGet=25;}}
+   if((tg===50&&yg===25)||(tg===25&&yg===50)||(tg===25&&yg===25)){s.referral.theyGet=50;s.referral.youGet=50;}}
   // migrate the old terse default to the friendlier one — only if the owner never customized it
   if(s.referral.template==="Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}")
     s.referral.template=d.referral.template;
