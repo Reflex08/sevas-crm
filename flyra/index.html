@@ -822,6 +822,10 @@ function normalize(r){
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
   s.referral=Object.assign({},d.referral,s.referral||{});
+  // one-time migration off the old 50-based defaults — the offer is $25/$25 (only legacy pairs move,
+  // an owner-typed custom amount is never touched)
+  {const tg=+s.referral.theyGet,yg=+s.referral.youGet;
+   if((tg===50&&yg===25)||(tg===25&&yg===50)||(tg===50&&yg===50)){s.referral.theyGet=25;s.referral.youGet=25;}}
   // migrate the old terse default to the friendlier one — only if the owner never customized it
   if(s.referral.template==="Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}")
     s.referral.template=d.referral.template;
@@ -2800,8 +2804,8 @@ function referralLink(customerId){
   const c=custById(customerId);if(!c)return null;
   const biz=db.settings.business||{};
   const r=db.settings.referral||{};
-  const payload={biz:biz.name||"",ph:cleanNum(biz.phone),ref:firstName(c.name),
-    tg:+r.theyGet||0,yg:+r.youGet||0,gc:+r.giftCard||0};
+  const payload={biz:biz.name||"",ph:cleanNum(biz.phone),ref:firstName(c.name),cid:c.id,
+    tg:+r.theyGet||0,yg:+r.youGet||0,gc:+r.giftCard||0}; // cid = bare client number so the email proof can say WHICH Jessica referred — no name/address leaks
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
     .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   return "https://reflex08.github.io/sevas-crm/referral.html?d="+b64;

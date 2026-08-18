@@ -84,6 +84,7 @@ function parseData(){
   if(!isFinite(+d.tg)||!isFinite(+d.yg))return null;
   return {
     biz:String(d.biz),ph:String(d.ph||"").replace(/[^\d+]/g,""),ref:String(d.ref),
+    cid:isFinite(+d.cid)?+d.cid:0,
     tg:+d.tg,yg:+d.yg,gc:isFinite(+d.gc)?+d.gc:0
   };
 }
@@ -94,11 +95,11 @@ function render(){
   var app=document.getElementById("app");
   app.innerHTML=
     '<div class="word">'+esc(d.biz)+'</div>'+
-    '<div class="hero">Give '+fmtDollar(d.tg)+'. Get '+fmtDollar(d.yg)+'.</div>'+
+    '<div class="hero">Give '+d.tg+'% or '+fmtDollar(d.tg)+'. Get '+fmtDollar(d.yg)+'.</div>'+
     '<div class="greet">Hi '+esc(d.ref)+', thanks for choosing '+esc(d.biz)+
       '. Know someone who could use us? Send them over and you both get taken care of.</div>'+
     '<div class="tiles">'+
-      '<div class="tile"><div class="tl">They get</div><div class="tv">'+fmtDollar(d.tg)+
+      '<div class="tile"><div class="tl">They get</div><div class="tv">'+d.tg+'% or '+fmtDollar(d.tg)+
         '</div><div class="ts">off their first service</div></div>'+
       '<div class="tile"><div class="tl">You get</div><div class="tv">'+fmtDollar(d.yg)+
         '</div><div class="ts">off'+(d.gc>0?' or a '+fmtDollar(d.gc)+' gift card':'')+'</div></div>'+
@@ -130,7 +131,8 @@ function submit(d){
       body:JSON.stringify({
         _subject:"REFERRAL — "+first+(last?" "+last:"")+" (from "+d.ref+")",
         _template:"table",
-        referred_by:d.ref,name:first+(last?" "+last:""),phone:phone,address:addr||"—",
+        referred_by:d.ref+(d.cid?" (client #"+d.cid+")":""),
+        name:first+(last?" "+last:""),phone:phone,address:addr||"—",
         they_get:"$"+d.tg,you_get:"$"+d.yg,received_at:new Date().toString()
       })}).catch(function(){});
   }catch(e){}
