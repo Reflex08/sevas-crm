@@ -711,7 +711,7 @@ const DEFAULT_SETTINGS=()=>({
     "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
     "Confirming this booking means you've read and agree to these terms."},
   referral:{theyGet:25,youGet:25,giftCard:0,sendWhen:"done",
-    template:"Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}"},
+    template:"Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, send them this link — when they book, you both get a reward: {referral_link}"},
 });
 const SIG_STUB="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -820,6 +820,9 @@ function normalize(r){
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
   s.referral=Object.assign({},d.referral,s.referral||{});
+  // migrate the old terse default to the friendlier one — only if the owner never customized it
+  if(s.referral.template==="Hi {customer_name}, know someone who'd like {company_name}? Refer them and you both get a reward: {referral_link}")
+    s.referral.template=d.referral.template;
   s.referral.theyGet=isFinite(+s.referral.theyGet)?Math.max(0,+s.referral.theyGet):d.referral.theyGet;
   s.referral.youGet=isFinite(+s.referral.youGet)?Math.max(0,+s.referral.youGet):d.referral.youGet;
   s.referral.giftCard=isFinite(+s.referral.giftCard)?Math.max(0,+s.referral.giftCard):d.referral.giftCard;
@@ -3096,9 +3099,9 @@ function blastTplBody(key){
 /* Per-client substitution for the blast's own tokens — deliberately just these three, not the
    Messages engine's {name}/{service}/{date} set (fillVars), since a blast has no job attached. */
 function blastBody(body,c){
-  return (body||"")
-    .replace(/\{firstname\}/gi,firstName(c.name))
-    .replace(/\{company\}/gi,(db.settings.business||{}).name||"")
+  return (body||"") // both token dialects — the referral template ships in {customer_name}/{company_name}
+    .replace(/\{(?:firstname|customer_name)\}/gi,firstName(c.name))
+    .replace(/\{(?:company|company_name)\}/gi,(db.settings.business||{}).name||"")
     .replace(/\{referral_link\}/gi,referralLink(c.id)||"");
 }
 function blastPhoneClients(){return db.customers.filter(c=>cleanNum(c.phone));}
