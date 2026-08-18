@@ -876,7 +876,7 @@ function normalize(r){
   r.seqE=seqOf(r.equipment);r.seqX=seqOf(r.expenses);r.seqPay=seqOf(r.payouts);
   return r;
 }
-function save(){db.updatedAt=Date.now();localStorage.setItem(DBKEY,JSON.stringify(db));scheduleSync();}
+function save(){stampChanges();db.updatedAt=Date.now();localStorage.setItem(DBKEY,JSON.stringify(db));scheduleSync();}
 /* Record a hard delete so a merge with a stale copy from another device can't resurrect it.
    Capped at the newest 500 per collection — plenty for a rolling week of cleanup on any device. */
 function tomb(coll,id){
@@ -4142,6 +4142,31 @@ async function syncFetchRemote(id){
 const MERGE_ORDER=["customers","users","plans","jobs","messages","pins","payouts"];
 const TOMB_COLLS=["jobs","customers","plans","messages","payouts"];
 const SEQ_OF={customers:"seqC",jobs:"seqJ",plans:"seqP",messages:"seqM",payouts:"seqPay",users:"seqU",pins:"seqPin"};
+/* ---- per-record edit stamps ----
+   The whole-db updatedAt says which DEVICE saved last, not which RECORD is fresher — resolving a
+   same-id conflict with it let an idle device's stale copy revert another device's edit on every
+   sync. So save() diffs each record against a snapshot of the last-persisted state and stamps the
+   ones that actually changed with up=now; mergeDb picks the newer up per record. The snapshot is
+   rebuilt after adopting cloud data so merged-in records never read as local edits. */
+function snapKeyMap(d){
+  const m=new Map();
+  MERGE_ORDER.forEach(coll=>(d[coll]||[]).forEach(r=>m.set(coll+":"+r.id,JSON.stringify(Object.assign({},r,{up:0})))));
+  m.set("settings",JSON.stringify(d.settings||{}));
+  return m;
+}
+let __snap=snapKeyMap(db);
+function stampChanges(){
+  const now=Date.now(),next=new Map();
+  MERGE_ORDER.forEach(coll=>(db[coll]||[]).forEach(r=>{
+    const k=coll+":"+r.id,j=JSON.stringify(Object.assign({},r,{up:0}));
+    if(__snap.get(k)!==j)r.up=now; // changed (or brand new) on THIS device right now
+    next.set(k,JSON.stringify(Object.assign({},r,{up:0})));
+  }));
+  const sj=JSON.stringify(db.settings||{});
+  if(__snap.get("settings")!==sj)db.settingsUp=now;
+  next.set("settings",sj);
+  __snap=next;
+}
 function remapRefs(coll,rec,reidMaps){
   const cm=reidMaps.customers,um=reidMaps.users;
   let out=rec;
@@ -4169,8 +4194,10 @@ function mergeDb(local,remote){
     out.deleted[k]=[...map.values()].sort((a,b)=>b.t-a.t).slice(0,500);
   });
   const isTomb=(coll,id,createdAt)=>(out.deleted[coll]||[]).some(t=>t.id===id&&t.t>=(createdAt||0));
-  // settings: whole object from the newer side — too intertwined to merge field-by-field
-  if(!localNewer&&remote.settings)out.settings=JSON.parse(JSON.stringify(remote.settings));
+  // settings: whole object from the side that last EDITED settings (settingsUp), not the side
+  // that last saved anything — falls back to db.updatedAt for pre-stamp data
+  const lsu=+local.settingsUp||+local.updatedAt||0,rsu=+remote.settingsUp||+remote.updatedAt||0;
+  if(rsu>lsu&&remote.settings){out.settings=JSON.parse(JSON.stringify(remote.settings));out.settingsUp=rsu;}
   const reidMaps={};
   MERGE_ORDER.forEach(coll=>{
     const lList=(local[coll]||[]).map(r=>remapRefs(coll,r,reidMaps));
@@ -4191,7 +4218,10 @@ function mergeDb(local,remote){
           reidMap[id]=newId;
           result.push(Object.assign({},l,{id:newId}));
           result.push(r);
-        }else result.push(localNewer?l:r); // one record, evolved — newer db.updatedAt wins it whole
+        }else{ // one record, evolved — the copy EDITED more recently wins (per-record up stamp);
+          const lu=+l.up||0,ru=+r.up||0; // legacy records without a stamp fall back to db.updatedAt
+          result.push(lu!==ru?(lu>ru?l:r):(localNewer?l:r));
+        }
         return;
       }
       const rec=l||r;
@@ -4229,6 +4259,7 @@ function dbEquivalent(a,b){
 function adoptCloud(remote){
   db=normalize(remote);
   localStorage.setItem(DBKEY,JSON.stringify(db));
+  __snap=snapKeyMap(db); // merged-in records must never read as fresh local edits on the next save
   render();
 }
 async function syncPull(){
