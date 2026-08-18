@@ -2948,6 +2948,7 @@ function runAutomations(){
   db.customers.filter(c=>c.stage==="quoted").forEach(c=>{
     const tries=kindMsgs(c.id,"followup");
     if(tries.some(m=>m.status==="queued"))return;      // one is already waiting to be sent
+    if(tries.some(m=>m.status==="dismissed"))return;   // owner ✕'d a follow-up — stop chasing this client
     if(tries.length>=maxTries)return;                  // stop nagging
     const quiet=Math.max(+c.createdAt||0,...(c.log||[]).map(l=>+l.t||0),...tries.map(m=>+m.t||0));
     if(now-quiet<every*day)return;
@@ -3001,6 +3002,13 @@ function sendMsg(id){
   toast("Messages opened — press send there","ok");
 }
 function deleteMsg(id){tomb("messages",id);db.messages=db.messages.filter(x=>x.id!==id);save();}
+/* ✕ on a draft = "already handled it / don't want it" — the record STAYS (hidden as dismissed) so
+   every rule's already-messaged check still sees it and never queues that draft again. Deleting
+   instead would erase the evidence and the next run would resurrect the exact same draft. */
+function dismissMsg(id){
+  const m=db.messages.find(x=>x.id===id);if(!m)return;
+  m.status="dismissed";m.t=Date.now();save();
+}
 
 /* --- screen --- */
 function msgRow(m,off){
@@ -3015,7 +3023,7 @@ function msgRow(m,off){
     '</div>'+
     (off?'':'<div class="msg-acts">'+
       '<button class="btn sm btn-primary" data-msend="'+m.id+'">💬 Send</button>'+
-      '<button class="btn sm btn-ghost" data-mdel="'+m.id+'" title="Delete draft">✕</button></div>')+
+      '<button class="btn sm btn-ghost" data-mdel="'+m.id+'" title="Dismiss — won’t be queued again">✕</button></div>')+
   '</div>';
 }
 function msgTplCard(){
@@ -3070,7 +3078,7 @@ function renderMessages(){
   const blastBtn=$("#msg-blast");if(blastBtn)blastBtn.onclick=openBlast;
   document.querySelectorAll("[data-msend]").forEach(b=>b.onclick=()=>sendMsg(+b.dataset.msend));
   document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{
-    deleteMsg(+b.dataset.mdel);render();toast("Draft deleted");});
+    dismissMsg(+b.dataset.mdel);render();toast("Dismissed — won’t come back for this client");});
   document.querySelectorAll("[data-mtpl]").forEach(el=>el.onchange=()=>{
     const t2=db.settings.templates[+el.dataset.mtpl];if(!t2)return;
     t2.body=el.value;save();toast("Template saved","ok");});
