@@ -859,6 +859,8 @@ function normalize(r){
     if(!Array.isArray(c.log))c.log=[];
     if(!c.stage||!STAGES.some(x=>x.id===c.stage))c.stage="new";
     if(typeof c.excuse!=="string")c.excuse="";
+    // "Seva CRM" was the old importer's stamp, not a lead source — owner: those are door-to-door
+    if(c.source==="Seva CRM")c.source="Door-to-door";
   });
   r.jobs.forEach(j=>{
     if(!Array.isArray(j.crewIds))j.crewIds=[];
@@ -3864,7 +3866,7 @@ function importServicePro(json){
     }
     const c={id:next.seqC++,name:String(oc.name||"").trim()||"Unnamed",phone:String(oc.phone||""),
       email:String(oc.email||""),street:String(oc.street||""),city:String(oc.city||""),lat:null,lng:null,
-      stage:SP_STAGE[oc.status]||"new",source:"Seva CRM",tags,notes:String(oc.notes||""),log,
+      stage:SP_STAGE[oc.status]||"new",source:"Door-to-door",tags,notes:String(oc.notes||""),log,
       createdAt:Date.now(),ownerId:1,followup:String(oc.followup||"")};
     next.customers.push(c);if(key)byPhone[key]=c;idMap[oc.id]=c.id;out.customers++;
   });
