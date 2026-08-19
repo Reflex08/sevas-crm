@@ -116,7 +116,9 @@ function parseData(){
   return {
     b:String(d.b),ph:String(d.ph).replace(/[^\d+]/g,""),n:String(d.n),s:String(d.s),
     dt:String(d.dt),t:d.t?String(d.t):"",p:+d.p,f:isFinite(+d.f)?+d.f:0,
-    x:typeof d.x==="string"?d.x:"",svcs:svcs
+    x:typeof d.x==="string"?d.x:"",svcs:svcs,
+    j:Array.isArray(d.j)?d.j.map(Number).filter(function(n){return isFinite(n)&&n>0;}):[],
+    c:isFinite(+d.c)?+d.c:0
   };
 }
 var DEFAULT_TERMS="1. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
@@ -175,6 +177,15 @@ function render(){
         '<div class="headline">Confirmed &mdash; thank you!</div>'+
         '<div class="note">A confirmation text is opening &mdash; please press send, it&#39;s your receipt.</div>'+
       '</div>';
+    // Tell the CRM directly — it polls the relay every minute and marks the booking
+    // confirmed by itself (no more checking email + tapping the chip by hand).
+    if(d.j.length){
+      try{
+        fetch("https://sevas-confirm-relay.confirm-relay.workers.dev/confirm",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({jobIds:d.j,cid:d.c,name:d.n})}).catch(function(){});
+      }catch(e){}
+    }
     // Automatic written proof of agreement, emailed to the business the moment they agree —
     // like a website quote form. Fire-and-forget; the SMS receipt below is the backup.
     try{

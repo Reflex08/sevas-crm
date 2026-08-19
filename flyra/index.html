@@ -2788,7 +2788,8 @@ function confirmLink(id){
   // day the owner writes custom terms: only sent when it differs from the app default.)
   const payload={b:biz.name||"",ph:bizPhone,n:firstName(c?c.name:""),
     s:sibs.map(x=>x.service).join(" + "),dt:j.date,
-    t:j.time||"",p:total,f:+t.cancelFeePct||0};
+    t:j.time||"",p:total,f:+t.cancelFeePct||0,
+    j:sibs.map(x=>x.id),c:j.customerId}; // job ids — the confirm page reports these to the relay so the ✓ lands by itself
   if((t.text||"")!==DEFAULT_SETTINGS().terms.text)payload.x=t.text||"";
   if(svcs.length>1)payload.svcs=svcs;
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
@@ -4106,6 +4107,36 @@ async function syncFetchRemote(id){
   const remote=JSON.parse(text);
   return (remote&&Array.isArray(remote.customers))?remote:null;
 }
+// Automatic client confirmations: confirm.html reports "these job ids agreed to the terms" to a
+// tiny Cloudflare relay when the client taps Agree. Every sync tick asks the relay what's new and
+// stamps termsAcceptedAt on the matching jobs — the green ✓ lands with no owner action. The relay
+// knows nothing but job numbers; the CRM only trusts ids that exist and are still unconfirmed.
+const CONFIRM_RELAY="https://sevas-confirm-relay.confirm-relay.workers.dev";
+const CONFIRM_RELAY_KEY="sv-9f2d71c4e8a35b06",CONFIRM_SEEN="flyra.confirmseen";
+async function pullConfirmations(){
+  try{
+    const since=+localStorage.getItem(CONFIRM_SEEN)||0;
+    const res=await fetch(CONFIRM_RELAY+"/confirms?since="+since+"&k="+CONFIRM_RELAY_KEY);
+    if(!res.ok)return;
+    const list=await res.json();
+    if(!Array.isArray(list)||!list.length)return;
+    let stamped=0,names=[];
+    list.forEach(rec=>{
+      (rec.jobIds||[]).forEach(id=>{
+        const j=db.jobs.find(x=>x.id===id);
+        if(j&&!j.termsAcceptedAt){
+          j.termsAcceptedAt=rec.t||Date.now();
+          const c=custById(j.customerId);
+          if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"📋 Booking confirmed by the client (via link)"});
+            if(!names.includes(c.name))names.push(c.name);}
+          stamped++;
+        }
+      });
+      if((+rec.t||0)>+((localStorage.getItem(CONFIRM_SEEN))||0))localStorage.setItem(CONFIRM_SEEN,String(rec.t));
+    });
+    if(stamped){save();render();toast((names.join(", ")||"A client")+" confirmed the booking ✓","ok");}
+  }catch(e){} // relay down = nothing happens; the manual ✓ chip still works
+}
 /* ---- mergeDb: pure record-level merge, never mutates either argument ----
    customers first (others reference customerId), then users (jobs reference closerId) — both are
    the only collections a same-id collision can re-id (both carry createdAt; the rest don't, so a
@@ -4244,6 +4275,7 @@ async function syncPull(){
     const merged=mergeDb(db,remote);
     if(!dbEquivalent(merged,db)){adoptCloud(merged);toast("Synced from your other device","ok");}
     if(!dbEquivalent(merged,remote))await syncPush(); // this device had something the cloud didn't — send it back
+    await pullConfirmations(); // piggybacks on the same minute tick — cheap no-op when nothing new
     paintSyncChip();return true;
   }catch(e){syncState="err";paintSyncChip();return false;}
 }
