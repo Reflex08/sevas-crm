@@ -1102,11 +1102,8 @@ function whoUser(){const u=userById(uiPref().who);return (u&&u.active!==false)?u
 function isRep(){const u=whoUser();return !!u&&(u.role==="sales"||u.role==="tech");}
 function visibleViews(){return isRep()?REP_VIEWS.slice():Object.keys(VIEWS);}
 function needsPin(u){return !!(db.settings.ownerPin)&&!!u&&(u.role==="owner"||u.role==="manager");}
-/* Called after the person changes: a rep lands on his own crew filter, and a screen he can no
-   longer reach falls back to Home. */
+/* Called after the person changes: a screen they can no longer reach falls back to Home. */
 function applyWhoDefaults(){
-  if(isRep()&&schedCrew==="all")schedCrew=whoUser().id;
-  if(!isRep())schedCrew="all";
   if(!visibleViews().includes(view))view="dashboard";
 }
 /* Returns false on a bad/blocked pick so both the picker and the gate read one truth. */
@@ -1119,7 +1116,7 @@ function pickWho(id,pin){
   render();
   return true;
 }
-function switchUser(){uiSet({who:null});schedCrew="all";drawer(false);render();}
+function switchUser(){uiSet({who:null});drawer(false);render();}
 function whoCard(u){
   const rm=ROLE_META[u.role]||ROLE_META.tech;
   return '<div class="who-card" data-who="'+u.id+'">'+
@@ -1439,16 +1436,15 @@ function renderRepHome(){
 let schedDay=today();               // ISO day the timeline/week centers on — in-memory only
 let schedAnchor=null;               // week view's FIRST column — day taps move schedDay, never this
 let schedView=uiPref().schedView||"day"; // day | week — persisted across sessions via uiSet
-let schedCrew="all";                // "all" or a user id — in-memory only
 let editJob=null;                   // job id open in the modal, null while creating
 
 function tlTimeRange(t){if(!t)return"";const[h,m]=t.split(":").map(Number);let eh=h+1,em=m;if(eh>23){eh=23;em=59;}
   return fmtTime(t)+" - "+fmtTime(eh+":"+em);}
-/* Jobs on one day, crew-filtered. Empty crewIds means "everyone", so it always passes the filter. */
+/* Jobs on one day. The crew filter is gone (owner order) — jobs stopped carrying crewIds when
+   the crew checkboxes left the form, so filtering by name never changed anything. */
 function dayJobs(date){
-  let jobs=db.jobs.filter(j=>j.date===date&&j.status!=="cancelled");
-  if(schedCrew!=="all")jobs=jobs.filter(j=>!j.crewIds.length||j.crewIds.includes(schedCrew));
-  return jobs.sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  return db.jobs.filter(j=>j.date===date&&j.status!=="cancelled")
+    .sort((a,b)=>(a.time||"").localeCompare(b.time||""));
 }
 function dayRev(date){return dayJobs(date).reduce((s,j)=>s+(j.status==="done"?(+j.collected||0):(+j.price||0)),0);}
 /* Rolling 7 days STARTING at the given date (owner's order: today first, never last Monday —
@@ -1509,9 +1505,6 @@ function schedHeader(){
   const date=d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
   const rev=dayRev(schedDay);
   const step=schedView==="week"?7:1;
-  const crewLabel=schedCrew==="all"?"All":((userById(schedCrew)||{}).name||"?");
-  const crewOpts='<option value="all"'+(schedCrew==="all"?" selected":"")+'>All</option>'+
-    userOptList(schedCrew==="all"?null:schedCrew).map(u=>'<option value="'+u.id+'"'+(schedCrew===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("");
   return '<div class="tl-head">'+
     '<div class="tlh-wrap">'+
       '<div class="tlh-dow">'+esc(dow)+'</div>'+
@@ -1527,8 +1520,6 @@ function schedHeader(){
         '<option value="day"'+(schedView==="day"?" selected":"")+'>Day</option>'+
         '<option value="week"'+(schedView==="week"?" selected":"")+'>7 days</option>'+
       '</select></div>'+
-    '<div class="fpill">👥 '+esc(crewLabel)+' ⌄'+
-      '<select id="sched-crew" aria-label="Crew filter">'+crewOpts+'</select></div>'+
   '</div>';
 }
 /* Fold same customer+date+time jobs into one display group (data/money untouched — this is
@@ -1631,7 +1622,6 @@ function renderSchedule(){
     renderSchedule();
   });
   const sv=$("#sched-view");if(sv)sv.onchange=()=>{schedView=sv.value;schedAnchor=null;uiSet({schedView});renderSchedule();};
-  const sc=$("#sched-crew");if(sc)sc.onchange=()=>{schedCrew=sc.value==="all"?"all":+sc.value;renderSchedule();};
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
     // stopPropagation: a merged card nests one data-jobcard row per job (see tlGroupCard/
     // weekGroupCard) — without it, a tap on a row would bubble to the card's own handler too.
