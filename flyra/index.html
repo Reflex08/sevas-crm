@@ -258,6 +258,7 @@
   .week-grid{display:grid;grid-template-columns:repeat(7,minmax(132px,1fr));gap:10px}
   .week-col{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;min-height:120px;cursor:pointer}
   .week-col.today{border-color:var(--brand)}
+  .week-col.sel{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
   .week-col-head{font-weight:800;font-size:12.5px;color:var(--muted);text-align:center;margin-bottom:8px;line-height:1.3}
   .week-col.today .week-col-head{color:var(--brand)}
   .week-col-body{display:flex;flex-direction:column;gap:6px}
@@ -1607,7 +1608,7 @@ function renderWeek(){
   const t=today();
   const cols=weekDates(schedDay).map(d=>{
     const dt=new Date(d+"T12:00:00"), jobs=groupSlotJobs(dayJobs(d));
-    return '<div class="week-col'+(d===t?" today":"")+'" data-wcol="'+d+'">'+
+    return '<div class="week-col'+(d===t?" today":"")+(d===schedDay?" sel":"")+'" data-wcol="'+d+'">'+
       '<div class="week-col-head">'+esc(dt.toLocaleDateString(undefined,{weekday:"short"}))+'<br>'+dt.getDate()+'</div>'+
       '<div class="week-col-body">'+(jobs.length?jobs.map(weekGroupCard).join(""):'<div class="week-empty">—</div>')+'</div>'+
     '</div>';
@@ -1637,7 +1638,9 @@ function renderSchedule(){
       openJob(null,{date:schedDay,time:String(el.dataset.tlhour).padStart(2,"0")+":00"});};
   });
   document.querySelectorAll("[data-wcol]").forEach(el=>{
-    el.onclick=e=>{if(e.target.closest("[data-jobcard]"))return;openJob(null,{date:el.dataset.wcol});};
+    // Tapping a day SELECTS it — header flips to that day's name/date/revenue. Never opens the
+    // booking modal (owner order: the ＋ button is how you add; a day tap is for looking).
+    el.onclick=e=>{if(e.target.closest("[data-jobcard]"))return;schedDay=el.dataset.wcol;renderSchedule();};
   });
   const ea=$("#empty-add-sched");if(ea)ea.onclick=()=>openJob(null,{date:schedDay});
 }
