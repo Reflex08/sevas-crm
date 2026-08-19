@@ -1973,26 +1973,32 @@ function openJob(id,preset){
   };
   bindSvcField(); // slot mode only — no-op when #jf-svcfield isn't in the form
   const sv=$("#jf-save");if(sv)sv.onclick=saveJobBtn; // only rendered for a NEW job (jobFoot)
+  // The profile sheet can sit OPEN under this modal (lead/client → job → Delete/Done). It
+  // paints from the db at open time, so after any job mutation it must be re-painted or it
+  // keeps showing the old jobs list until manually reopened.
+  const refreshProfile=cid=>{if(openModals.has("cust-overlay")&&cid)openCustProfile(cid);};
   const del=$("#jf-delete");if(del)del.onclick=()=>{
     if(!editJob)return;
     // Re-read fresh from the db rather than trusting the closed-over `siblings` — nothing else
     // should have moved the record between opening the modal and this click, but this is cheap
     // and matches the done/undone pattern below.
     const cj=db.jobs.find(x=>x.id===editJob),sibs=cj?slotSiblings(cj):[];
+    const cid=cj?cj.customerId:null;
     if(sibs.length>1){
       if(!confirm("Delete "+sibs.length+" jobs for "+(c?c.name:"this customer")+"?"))return;
       sibs.forEach(sj=>deleteJob(sj.id));
-      closeModal("job-overlay");render();toast("Jobs deleted","ok");
+      closeModal("job-overlay");render();refreshProfile(cid);toast("Jobs deleted","ok");
     }else{
-      deleteJob(editJob);closeModal("job-overlay");render();toast("Job deleted","ok");
+      deleteJob(editJob);closeModal("job-overlay");render();refreshProfile(cid);toast("Job deleted","ok");
     }
   };
   const done=$("#jf-done");if(done)done.onclick=()=>{
     const cj=db.jobs.find(x=>x.id===editJob),sibs=cj?slotSiblings(cj):[];
+    const cid=cj?cj.customerId:null;
     const r=sibs.length>1?completeSlot(cj.customerId,cj.date,cj.time||"") // one combined payment question
       :completeJobFlow(editJob);
     if(!r){toast("Left as booked","ok");return;} // backed out of both prompts — nothing changed
-    closeModal("job-overlay");render();
+    closeModal("job-overlay");render();refreshProfile(cid);
     toast("Job marked done","ok");
   };
   const undone=$("#jf-undone");if(undone)undone.onclick=()=>{
@@ -2005,7 +2011,7 @@ function openJob(id,preset){
       if(jj&&(+jj.collected||0)>0&&!confirm("This job shows "+money(jj.collected)+" collected — undoing clears that. Sure?"))return;
       uncompleteJob(editJob);
     }
-    closeModal("job-overlay");render();
+    closeModal("job-overlay");render();refreshProfile(jj?jj.customerId:null);
     toast("Back on the schedule","ok");
   };
   const conf=$("#jf-confirm");if(conf)conf.onclick=()=>{
@@ -2289,7 +2295,6 @@ function openCustProfile(id){
     sec("Contact")+
     '<div class="kv">'+
       '<div class="k">Phone</div><div class="v">'+(c.phone?'<a href="tel:'+esc(cleanNum(c.phone))+'">'+esc(fmtPhone(c.phone))+'</a>':'—')+'</div>'+
-      '<div class="k">Email</div><div class="v">'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'—')+'</div>'+
       '<div class="k">Address</div><div class="v">'+esc(addr||"—")+'</div>'+
       '<div class="k">Source</div><div class="v">'+esc(c.source||"—")+'</div>'+
       '<div class="k">Rep</div><div class="v">'+(rep?esc((userById(c.ownerId)||{}).name||"—")
@@ -2360,7 +2365,6 @@ function custForm(c){
       '<div class="field"><label>Name *</label><input id="ce-name" value="'+val("name")+'" placeholder="Jordan Michaels"></div>'+
       '<div class="field"><label>Phone</label><input id="ce-phone" type="tel" value="'+val("phone")+'" placeholder="(416) 555-0123"></div>'+
     '</div>'+
-    '<div class="field"><label>Email</label><input id="ce-email" type="email" value="'+val("email")+'"></div>'+
     '<div class="grid2">'+
       '<div class="field"><label>Street</label><input id="ce-street" value="'+val("street")+'"></div>'+
       '<div class="field"><label>City</label><input id="ce-city" value="'+esc(c?(c.city||""):"Toronto")+'"></div>'+
@@ -2399,7 +2403,7 @@ function openCustEdit(id){
     if(!name){toast("A lead needs a name","err");return;}
     const data={name,
       phone:($("#ce-phone").value||"").trim(),
-      email:($("#ce-email").value||"").trim(),
+      email:c?(c.email||""):"", // email field removed from the form — existing values ride along untouched
       street:($("#ce-street").value||"").trim(),
       city:($("#ce-city").value||"").trim(),
       stage:c?c.stage:"new", // no Stage dropdown — new leads start at "new", ✓/Mark lost move them
