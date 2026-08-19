@@ -1435,6 +1435,7 @@ function renderRepHome(){
 }
 /* ---------------- Schedule (screen 3) ---------------- */
 let schedDay=today();               // ISO day the timeline/week centers on — in-memory only
+let schedAnchor=null;               // week view's FIRST column — day taps move schedDay, never this
 let schedView=uiPref().schedView||"day"; // day | week — persisted across sessions via uiSet
 let schedCrew="all";                // "all" or a user id — in-memory only
 let editJob=null;                   // job id open in the modal, null while creating
@@ -1606,7 +1607,7 @@ function weekGroupCard(g){
 }
 function renderWeek(){
   const t=today();
-  const cols=weekDates(schedDay).map(d=>{
+  const cols=weekDates(schedAnchor||schedDay).map(d=>{
     const dt=new Date(d+"T12:00:00"), jobs=groupSlotJobs(dayJobs(d));
     return '<div class="week-col'+(d===t?" today":"")+(d===schedDay?" sel":"")+'" data-wcol="'+d+'">'+
       '<div class="week-col-head">'+esc(dt.toLocaleDateString(undefined,{weekday:"short"}))+'<br>'+dt.getDate()+'</div>'+
@@ -1616,14 +1617,18 @@ function renderWeek(){
   return '<div class="week-wrap"><div class="week-grid">'+cols+'</div></div>';
 }
 function renderSchedule(){
+  if(schedView==="week"&&!schedAnchor)schedAnchor=schedDay; // pin the strip's start once
   $("#content").innerHTML=schedHeader()+(schedView==="week"?renderWeek():renderDayTimeline());
   document.querySelectorAll("[data-dnav]").forEach(b=>b.onclick=()=>{
     const delta=+b.dataset.dnav;
-    if(!delta)schedDay=today();
-    else{const d=new Date(schedDay+"T12:00:00");d.setDate(d.getDate()+delta);schedDay=localISO(d);}
+    if(!delta){schedDay=today();schedAnchor=schedView==="week"?today():null;}
+    else if(schedView==="week"){ // ‹ › page the whole strip; focus follows to its first day
+      const d=new Date((schedAnchor||schedDay)+"T12:00:00");d.setDate(d.getDate()+delta);
+      schedAnchor=localISO(d);schedDay=schedAnchor;
+    }else{const d=new Date(schedDay+"T12:00:00");d.setDate(d.getDate()+delta);schedDay=localISO(d);schedAnchor=null;}
     renderSchedule();
   });
-  const sv=$("#sched-view");if(sv)sv.onchange=()=>{schedView=sv.value;uiSet({schedView});renderSchedule();};
+  const sv=$("#sched-view");if(sv)sv.onchange=()=>{schedView=sv.value;schedAnchor=null;uiSet({schedView});renderSchedule();};
   const sc=$("#sched-crew");if(sc)sc.onchange=()=>{schedCrew=sc.value==="all"?"all":+sc.value;renderSchedule();};
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
     // stopPropagation: a merged card nests one data-jobcard row per job (see tlGroupCard/
