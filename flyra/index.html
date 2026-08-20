@@ -721,12 +721,14 @@ const DEFAULT_SETTINGS=()=>({
   ownerPin:"",   // "" = off. Deterrent on the owner/manager tile in the who-picker, not security.
   tier:"business",
   terms:{cancelFeePct:20,text:"1. Service — our technician will make every effort to leave every window clean and clear. Results still depend on the condition of the glass: hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, so 100% perfect results cannot be guaranteed.\n"+
-    "2. Touch-ups — if we missed a spot and it's a reasonable ask, point it out to the technician on-site within 15 minutes of the job being completed and we'll gladly redo it free of charge. Once the crew has left, the work is considered accepted.\n"+
-    "3. Payment — payment is due upon completion of the service, or before, unless agreed otherwise in writing.\n"+
-    "4. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
+    "2. Touch-ups — if we missed a spot and it's a reasonable ask, point it out to the technician on-site within 15 minutes of the job being completed and we'll gladly redo it free of charge. After our crew leaves the property, the job is considered accepted and complete — we do not return for free touch-ups.\n"+
+    "3. Payment — payment is due upon completion of the service, or before, unless agreed otherwise in writing. We accept cash, e-transfer, and card. If a balance is left unpaid, scheduled future visits may be paused until it is settled.\n"+
+    "4. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, pets secured, and nothing blocking ladders or walkways. Windows that cannot be safely accessed may be skipped and deducted from the price.\n"+
     "5. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
-    "6. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
-    "7. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n\n"+
+    "6. Safety — the technician may decline any window or area he judges unsafe (unstable footing, wasp nests, aggressive pets, damaged structures); any skipped work is deducted from the price.\n"+
+    "7. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
+    "8. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
+    "9. Liability — if something goes wrong that is our fault, our responsibility is limited to repairing the issue or refunding up to the amount paid for the service.\n\n"+
     "Confirming this booking means you've read and agree to these terms."},
   referral:{theyGet:50,youGet:50,giftCard:0,sendWhen:"done",
     template:"Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, tap the link below and pop in their info — when they book, you both get a reward: {referral_link}"},
@@ -842,6 +844,8 @@ function normalize(r){
   if(s.terms.text.indexOf("6. Payment — payment is due on completion of the work")>=0)s.terms.text=d.terms.text;
   // v2 → v3: touch-ups became on-site-within-15-minutes (no free come-backs) — same fingerprint idea
   if(s.terms.text.indexOf("we'll gladly come back to touch it up free of charge")>=0)s.terms.text=d.terms.text;
+  // v3 → v4 (2026-08-20): expanded to 9 sections — payment methods, safety, liability
+  if(s.terms.text.indexOf("Once the crew has left, the work is considered accepted.")>=0)s.terms.text=d.terms.text;
   s.referral=Object.assign({},d.referral,s.referral||{});
   // one-time migration off the older default pairs — owner set the offer to $50/$50 (2026-08-17).
   // Only the known legacy pairs move; an owner-typed custom amount is never touched.
