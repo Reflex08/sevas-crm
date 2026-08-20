@@ -1995,6 +1995,7 @@ function openJob(id,preset){
   // Address line under the name: tap → Waze opens and starts navigating there (best route).
   const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
   $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
+    (c&&c.phone?' <a class="btn sm" style="margin-left:8px;text-decoration:none" href="tel:'+esc(smsNum(c.phone))+'">📞 Call</a>':"")+
     (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"")+
     (showConfirm?(j.termsAcceptedAt?
       ' <button class="btn sm" id="jf-confirm" style="margin-left:8px">✓ Confirmed</button>':
@@ -2354,7 +2355,7 @@ function openCustProfile(id){
   $("#cust-body").innerHTML=
     sec("Contact")+
     '<div class="kv">'+
-      '<div class="k">Phone</div><div class="v">'+(c.phone?'<a href="tel:'+esc(cleanNum(c.phone))+'">'+esc(fmtPhone(c.phone))+'</a>':'—')+'</div>'+
+      '<div class="k">Phone</div><div class="v">'+(c.phone?'<a href="tel:'+esc(smsNum(c.phone))+'">'+esc(fmtPhone(c.phone))+'</a>':'—')+'</div>'+
       '<div class="k">Address</div><div class="v">'+esc(addr||"—")+'</div>'+
       '<div class="k">Source</div><div class="v">'+esc(c.source||"—")+'</div>'+
       '<div class="k">Rep</div><div class="v">'+(rep?esc((userById(c.ownerId)||{}).name||"—")
@@ -2391,7 +2392,8 @@ function openCustProfile(id){
         :'<div class="note">Nothing logged yet.</div>'));
   $("#cust-foot").innerHTML=
     (rep?"":'<button class="btn del" id="cp-del">Delete</button>')+'<span class="spacer"></span>'+
-    (c.phone?'<a class="btn" style="text-decoration:none" href="sms:'+esc(smsNum(c.phone))+'">💬 Text</a>':'')+
+    (c.phone?'<a class="btn" style="text-decoration:none" href="tel:'+esc(smsNum(c.phone))+'">📞 Call</a>'+
+      '<a class="btn" style="text-decoration:none" href="sms:'+esc(smsNum(c.phone))+'">💬 Text</a>':'')+
     (c.stage!=="lost"?'<button class="btn" id="cp-lost">Mark lost</button>':'')+
     '<button class="btn" id="cp-job">＋ Job</button>'+
     '<button class="btn btn-primary" id="cp-close">Close</button>';
