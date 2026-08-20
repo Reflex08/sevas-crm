@@ -272,16 +272,6 @@
   .week-card .wp{font-size:11.5px;font-weight:800;margin-top:2px}
   .wk-item{display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:rgba(255,255,255,.9)}
   .week-empty{color:var(--faint);font-size:11.5px;text-align:center;padding:14px 0;font-style:italic}
-  /* month view (owner order 2026-08-19): per-day done/booked counts at a glance */
-  .mo-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:12px}
-  .mo-dow{text-align:center;font-size:11px;color:var(--faint);font-weight:700;padding:2px 0}
-  .mo-cell{border:1px solid var(--line);border-radius:10px;min-height:54px;padding:6px 7px;cursor:pointer}
-  .mo-cell:hover{background:var(--hover)}
-  .mo-cell.empty{border:0;cursor:default;background:transparent}
-  .mo-cell.today{border-color:var(--brand)}
-  .mo-cell.quiet .mo-d{color:var(--faint)}
-  .mo-d{font-size:12px;font-weight:700}
-  .mo-n{margin-top:5px;font-size:12.5px;font-weight:800;color:var(--brand)}
   /* ---------- Job form crew picker ---------- */
   .crew-row{display:flex;gap:12px;flex-wrap:wrap}
   .crew-chk{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;cursor:pointer}
@@ -716,6 +706,7 @@ const MSG_KINDS={
   reminder:{label:"Reminder",cls:"b-scheduled"},
   manual:{label:"Manual",cls:"b-new"},
   referral:{label:"Referral",cls:"b-owner"},
+  thanks:{label:"Thank you",cls:"b-won"},
 };
 const TPL_FOR={reminder:"t1",followup:"t2",review:"t3"}; // kind → template id (names stay fixed)
 const MSG_VARS=["{firstname}","{name}","{service}","{date}","{time}","{business}"];
@@ -892,13 +883,19 @@ function normalize(r){
     j.commissionPct=+j.commissionPct||0;
     j.termsAcceptedAt=+j.termsAcceptedAt||0;
   });
-  // Fiyin hired Mon 2026-08-17 4pm (owner order 2026-08-19): from that moment on, every job
-  // nobody else closed is his at 20% — including bookings made later (createJob applies the same
-  // rule live; this backfills + self-heals on every load). A job with its own closer or splits
-  // is never touched (a rep's credit stays a rep's).
-  {const fy=r.users.find(u=>u.role==="tech"&&/fiyin/i.test(u.name||"")&&u.active!==false);
+  // Fiyin hired Mon 2026-08-17 4pm; his pay is a CLEANING commission (owner order 2026-08-20):
+  // stamped when a job goes Done, backfilled here for jobs finished since the hire moment.
+  // Closers keep their closing commission untouched.
+  {const fy=activeTech(r.users);
    if(fy&&!(+fy.commissionPct))fy.commissionPct=20;
-   r.jobs.forEach(j=>hireRuleStamp(r.users,j));}
+   r.jobs.forEach(j=>{
+     j.cleanerId=j.cleanerId?+j.cleanerId||null:null;
+     j.cleanerPct=+j.cleanerPct||0;
+     // undo the short-lived 2026-08-19 rule that made the tech a CLOSER — a tech never closes
+     if(j.closerId){const u=r.users.find(x=>x.id===j.closerId);
+       if(u&&u.role==="tech"){j.closerId=null;j.commissionPct=0;}}
+     if(j.status!=="cancelled")stampCleaner(j,r.users);
+   });}
   r.invoices.forEach(i=>{
     if(!Array.isArray(i.lines))i.lines=[];
     if(!Array.isArray(i.jobIds))i.jobIds=[];
@@ -1043,14 +1040,19 @@ function jobCloserId(j){ // who gets credit for this job at all: its own closer,
    (explicit closerId+commissionPct stamp only — no ownerId fallback, that inflated imported books). */
 function jobCredits(j){
   const price=+j.price||0;
+  const out=[];
   if(Array.isArray(j.splits)&&j.splits.length)
-    return j.splits.map(s=>({userId:s.userId,pct:+s.pct||0,
-      amount:price*(+s.pct||0)/100,salesShare:price/j.splits.length}));
+    out.push(...j.splits.map(s=>({userId:s.userId,pct:+s.pct||0,
+      amount:price*(+s.pct||0)/100,salesShare:price/j.splits.length})));
   // A stamped closer at 0% (the owner's own closes) still gets the SALE credit — only the
   // commission amount is zero. Requiring pct>0 here would wipe the owner off the leaderboard.
-  if(j.closerId)
-    return [{userId:j.closerId,pct:+j.commissionPct||0,amount:price*(+j.commissionPct||0)/100,salesShare:price}];
-  return [];
+  else if(j.closerId)
+    out.push({userId:j.closerId,pct:+j.commissionPct||0,amount:price*(+j.commissionPct||0)/100,salesShare:price});
+  // Cleaning pay (owner order 2026-08-20): closing and CLEANING are separate credits — the tech
+  // who worked the job earns his own rate on top, with no sale credit (it wasn't his close).
+  if(j.cleanerId&&(+j.cleanerPct||0)>0)
+    out.push({userId:j.cleanerId,pct:+j.cleanerPct,amount:price*(+j.cleanerPct)/100,salesShare:0,cleaning:true});
+  return out;
 }
 function jobCreditedTo(j,userId){return jobCredits(j).some(c=>c.userId===userId);}
 function jobCommission(j){ // {userId,amount} the job actually owes, or null if nobody earns anything.
@@ -1062,14 +1064,15 @@ function jobCommission(j){ // {userId,amount} the job actually owes, or null if 
 /* Owner order 2026-08-19: commission is EARNED only once the job is paid in full — a done-but-
    unpaid job keeps its sale credit on the leaderboard, but owes $0 until the money is collected. */
 function jobPaid(j){return j.status==="done"&&(+j.collected||0)>=(+j.price||0);}
-/* Fiyin's hire rule (owner order 2026-08-19): a closer-less, split-less, non-cancelled job dated
-   after Mon 2026-08-17 4pm belongs to the active tech named Fiyin at his configured rate. */
-function hireRuleStamp(users,j){
-  if(j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled")return;
-  const dt=j.date||"";
-  if(!(dt>"2026-08-17"||(dt==="2026-08-17"&&(j.time||"")>="16:00")))return;
-  const fy=(users||[]).find(u=>u.role==="tech"&&/fiyin/i.test(u.name||"")&&u.active!==false);
-  if(fy){j.closerId=fy.id;j.commissionPct=+fy.commissionPct||20;}
+/* Fiyin's hire rule, corrected (owner order 2026-08-20): NOT a closer — reps keep closing
+   commission; Fiyin earns his CLEANING rate on every job he's worked since his hire moment
+   (Mon 2026-08-17 4pm), stamped the moment the job goes Done. */
+function activeTech(users){return (users||db.users||[]).find(u=>u.role==="tech"&&/fiyin/i.test(u.name||"")&&u.active!==false);}
+function afterHire(j){const dt=j.date||"";return dt>"2026-08-17"||(dt==="2026-08-17"&&(j.time||"")>="16:00");}
+function stampCleaner(j,users){
+  if(j.cleanerId||j.status!=="done"||!afterHire(j))return;
+  const fy=activeTech(users);
+  if(fy){j.cleanerId=fy.id;j.cleanerPct=+fy.commissionPct||20;} // rate as of completion — later rate changes don't rewrite history
 }
 /* Top Salespeople — done jobs in a period, credited per job via jobCredits (splits, or the single
    stamped closer). `key` is a payPeriodKey() string ("YYYY-MM" or "YYYY"); omitted = this month. */
@@ -1078,6 +1081,7 @@ function leaderboardRows(metric,key){
   const byUser={};
   db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,ym)).forEach(j=>{
     jobCredits(j).forEach(cr=>{
+      if(cr.cleaning)return; // the sales race stays a SALES race — cleaning pay lives in payroll/My money
       const o=byUser[cr.userId]=byUser[cr.userId]||{sales:0,count:0,comm:0};
       o.sales+=cr.salesShare;o.comm+=jobPaid(j)?cr.amount:0;o.count+=1;
     });
@@ -1401,11 +1405,14 @@ function repCommRow(row){
 function repMoneyPanel(me){
   const key=payPeriodKey("month");
   const r=leaderboardRows("sales",key).find(x=>x.user.id===me.id)||{sales:0,comm:0,count:0};
-  const paid=payoutsSum(me.id,key),owed=Math.max(0,r.comm-paid);
-  const chip=(l,n)=>'<div class="schip"><div class="l">'+esc(l)+'</div><div class="n">'+esc(n)+'</div></div>';
   const cd=repCommRows(me.id,key);
+  // Commission comes from repCommRows, not the leaderboard — a tech's CLEANING pay never enters
+  // the sales race but absolutely belongs in his money. For a rep the two totals are identical.
+  const comm=cd.doneTotal;
+  const paid=payoutsSum(me.id,key),owed=Math.max(0,comm-paid);
+  const chip=(l,n)=>'<div class="schip"><div class="l">'+esc(l)+'</div><div class="n">'+esc(n)+'</div></div>';
   const commChip='<div class="schip" id="rep-comm-chip" style="cursor:pointer">'+
-      '<div class="l">Commission '+(repCommOpen?"▾":"▸")+'</div><div class="n">'+esc(money2(r.comm))+'</div></div>';
+      '<div class="l">Commission '+(repCommOpen?"▾":"▸")+'</div><div class="n">'+esc(money2(comm))+'</div></div>';
   const drill=repCommOpen?'<div style="margin-top:10px">'+
       (cd.rows.length?cd.rows.map(repCommRow).join(""):'<div class="sub" style="font-style:italic">No commission jobs this month.</div>')+
       (cd.unpaidTotal>0?'<div class="sub" style="padding:2px 0 0 4px;font-style:italic">Done, waiting on payment: '+esc(money2(cd.unpaidTotal))+'</div>':'')+
@@ -1413,15 +1420,18 @@ function repMoneyPanel(me){
     '</div>':'';
   return '<div class="panel"><h2>My money<span class="pill">'+
       esc(new Date().toLocaleDateString(undefined,{month:"long"}))+'</span></h2><div class="panel-pad">'+
-    '<div class="chip-row" style="margin-top:0">'+chip("My sales",money2(r.sales))+
+    '<div class="chip-row" style="margin-top:0">'+(me.role==="tech"?"":chip("My sales",money2(r.sales)))+
       commChip+chip("Paid out",money2(paid))+chip("Owed",money2(owed))+'</div>'+
-    '<div class="hint">'+r.count+' job'+(r.count!==1?"s":"")+' credited to you this month.</div>'+
+    '<div class="hint">'+(me.role==="tech"
+      ?cd.rows.filter(x=>x.done).length+' job'+(cd.rows.filter(x=>x.done).length!==1?"s":"")+' cleaned this month.'
+      :r.count+' job'+(r.count!==1?"s":"")+' credited to you this month.')+'</div>'+
     drill+
   '</div></div>';
 }
-/* His board for today: on the crew, or he closed it. */
+/* His board for today: a tech cleans EVERYTHING booked today; a rep sees what he's on or closed. */
 function repDayJobs(me){
   const t=today();
+  if(me.role==="tech")return dayJobs(t);
   return db.jobs.filter(j=>j.date===t&&j.status!=="cancelled"&&
       (j.crewIds.includes(me.id)||jobCloserId(j)===me.id||jobCreditedTo(j,me.id)))
     .sort((a,b)=>(a.time||"").localeCompare(b.time||""));
@@ -1483,7 +1493,7 @@ function renderRepHome(){
 /* ---------------- Schedule (screen 3) ---------------- */
 let schedDay=today();               // ISO day the timeline/week centers on — in-memory only
 let schedAnchor=null;               // week view's FIRST column — day taps move schedDay, never this
-let schedView=uiPref().schedView||"day"; // day | week — persisted across sessions via uiSet
+let schedView=["day","week"].includes(uiPref().schedView)?uiPref().schedView:"day"; // day | week — persisted via uiSet (a stored "month" from the removed view falls back to day)
 let editJob=null;                   // job id open in the modal, null while creating
 
 function tlTimeRange(t){if(!t)return"";const[h,m]=t.split(":").map(Number);let eh=h+1,em=m;if(eh>23){eh=23;em=59;}
@@ -1514,7 +1524,6 @@ function createJob(data){
     const c=custById(j.customerId),u=c&&c.ownerId?userById(c.ownerId):null;
     if(u&&(+u.commissionPct||0)>0){j.closerId=u.id;j.commissionPct=+u.commissionPct;}
   }
-  hireRuleStamp(db.users,j); // still nobody's? From Fiyin's hire moment on, it's his (20%)
   db.jobs.push(j);save();return j;
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
@@ -1529,11 +1538,12 @@ function completeJobFlow(id){
   if(!paid&&price>0&&!confirm("Mark it done but NOT paid yet?"))return null; // backed out — stays booked
   j.status="done";if(!j.completedAt)j.completedAt=Date.now();
   j.collected=paid?price:0;
+  stampCleaner(j,db.users); // pressing Done is what earns the tech his cleaning commission
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+j.service+" — "+(paid?"collected "+money(price):"unpaid")});}
   save();
   if(j.planId)ensurePlanJobs(); // a plan visit is done — queue its next one
-  queueReferral(j.customerId);
+  queueThanks(j.customerId);
   return j;
 }
 /* Fat-finger insurance: put a done job back on the schedule. Collected money is zeroed (it was
@@ -1542,6 +1552,7 @@ function uncompleteJob(id){
   const j=db.jobs.find(x=>x.id===id);if(!j||j.status!=="done")return null;
   const had=+j.collected||0;
   j.status="scheduled";j.completedAt=0;j.collected=0;j.payMethod="";
+  j.cleanerId=null;j.cleanerPct=0; // an accidental Done never leaves cleaning pay behind
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Back to scheduled — Done undone"+(had?" (had $"+had.toFixed(2)+" collected, now cleared)":"")});}
   save();return j;
@@ -1550,32 +1561,24 @@ function uncompleteJob(id){
 /* --- rendering --- */
 function schedHeader(){
   const d=new Date(schedDay+"T12:00:00"); // noon guard — no UTC rollover
-  const month=schedView==="month";
-  const mk=schedDay.slice(0,7);
-  // Owner order 2026-08-19: month view's headline is the DONE count, not revenue.
-  const doneN=month?db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===mk).length:0;
-  const dow=month?String(d.getFullYear()):d.toLocaleDateString(undefined,{weekday:"long"});
-  const date=month?d.toLocaleDateString(undefined,{month:"long"}):d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
+  const dow=d.toLocaleDateString(undefined,{weekday:"long"});
+  const date=d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
   const rev=dayRev(schedDay);
   const step=schedView==="week"?7:1;
-  const sub=month
-    ?'<span style="color:var(--brand);font-weight:800">'+doneN+'</span> job'+(doneN===1?"":"s")+' completed this month'+
-      (mk!==today().slice(0,7)?' · <button class="btn sm" data-dnav="0">Today</button>':'')
-    :'Total rev: <span style="color:var(--brand);font-weight:800">'+money(rev)+'</span>'+
-      (schedDay!==today()?' · <button class="btn sm" data-dnav="0">Today</button>':'');
   return '<div class="tl-head">'+
     '<div class="tlh-wrap">'+
       '<div class="tlh-dow">'+esc(dow)+'</div>'+
       '<div class="tlh-date">'+esc(date)+'</div>'+
-      '<div class="tl-rev">'+sub+'</div>'+
+      '<div class="tl-rev">Total rev: <span style="color:var(--brand);font-weight:800">'+money(rev)+'</span>'+
+        (schedDay!==today()?' · <button class="btn sm" data-dnav="0">Today</button>':'')+
+      '</div>'+
     '</div>'+
     '<button class="nb" data-dnav="-'+step+'" aria-label="Back">‹</button>'+
     '<button class="nb" data-dnav="'+step+'" aria-label="Forward">›</button>'+
-    '<div class="fpill">'+(schedView==="day"?"Day":schedView==="week"?"7 days":"Month")+' ⌄'+
+    '<div class="fpill">'+(schedView==="day"?"Day":"7 days")+' ⌄'+
       '<select id="sched-view" aria-label="Schedule view">'+
         '<option value="day"'+(schedView==="day"?" selected":"")+'>Day</option>'+
         '<option value="week"'+(schedView==="week"?" selected":"")+'>7 days</option>'+
-        '<option value="month"'+(schedView==="month"?" selected":"")+'>Month</option>'+
       '</select></div>'+
   '</div>';
 }
@@ -1666,48 +1669,18 @@ function renderWeek(){
   }).join("");
   return '<div class="week-wrap"><div class="week-grid">'+cols+'</div></div>';
 }
-/* Month grid: one cell per day, done/total job count only — a glance tool, not a booking surface.
-   Tapping a day jumps to that day's timeline. */
-function renderMonth(){
-  const base=new Date(schedDay+"T12:00:00");
-  const y=base.getFullYear(),m=base.getMonth();
-  const startDow=new Date(y,m,1,12).getDay();
-  const dim=new Date(y,m+1,0).getDate();
-  const t=today();
-  let cells="";
-  for(let i=0;i<startDow;i++)cells+='<div class="mo-cell empty"></div>';
-  for(let dd=1;dd<=dim;dd++){
-    const iso=y+"-"+String(m+1).padStart(2,"0")+"-"+String(dd).padStart(2,"0");
-    const jobs=dayJobs(iso);
-    const doneN=jobs.filter(j=>j.status==="done").length;
-    cells+='<div class="mo-cell'+(iso===t?" today":"")+(jobs.length?"":" quiet")+'" data-mday="'+iso+'">'+
-      '<div class="mo-d">'+dd+'</div>'+
-      (jobs.length?'<div class="mo-n">'+doneN+'/'+jobs.length+'</div>':'')+
-    '</div>';
-  }
-  const dows=["S","M","T","W","T","F","S"].map(x=>'<div class="mo-dow">'+x+'</div>').join("");
-  return '<div class="panel"><div class="mo-grid">'+dows+cells+'</div>'+
-    '<div class="hint" style="padding:0 12px 10px">done / booked per day — tap a day to open it</div></div>';
-}
 function renderSchedule(){
   if(schedView==="week"&&!schedAnchor)schedAnchor=schedDay; // pin the strip's start once
-  $("#content").innerHTML=schedHeader()+
-    (schedView==="week"?renderWeek():schedView==="month"?renderMonth():renderDayTimeline());
+  $("#content").innerHTML=schedHeader()+(schedView==="week"?renderWeek():renderDayTimeline());
   document.querySelectorAll("[data-dnav]").forEach(b=>b.onclick=()=>{
     const delta=+b.dataset.dnav;
     if(!delta){schedDay=today();schedAnchor=schedView==="week"?today():null;}
-    else if(schedView==="month"){ // ‹ › page whole calendar months
-      const d=new Date(schedDay+"T12:00:00");d.setDate(1);d.setMonth(d.getMonth()+(delta>0?1:-1));
-      schedDay=localISO(d);schedAnchor=null;
-    }
     else if(schedView==="week"){ // ‹ › page the whole strip; focus follows to its first day
       const d=new Date((schedAnchor||schedDay)+"T12:00:00");d.setDate(d.getDate()+delta);
       schedAnchor=localISO(d);schedDay=schedAnchor;
     }else{const d=new Date(schedDay+"T12:00:00");d.setDate(d.getDate()+delta);schedDay=localISO(d);schedAnchor=null;}
     renderSchedule();
   });
-  document.querySelectorAll("[data-mday]").forEach(el=>el.onclick=()=>{
-    schedDay=el.dataset.mday;schedView="day";schedAnchor=null;uiSet({schedView});renderSchedule();});
   const sv=$("#sched-view");if(sv)sv.onchange=()=>{schedView=sv.value;schedAnchor=null;uiSet({schedView});renderSchedule();};
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
     // stopPropagation: a merged card nests one data-jobcard row per job (see tlGroupCard/
@@ -2210,12 +2183,12 @@ function completeSlot(customerId,date,time){
   const total=jobs.reduce((s,j)=>s+(+j.price||0),0);
   const paid=total>0&&confirm("Collected "+money(total)+" for "+jobs.map(j=>j.service).join(" + ")+"?");
   if(!paid&&total>0&&!confirm("Mark it done but NOT paid yet?"))return null; // backed out — stays booked
-  jobs.forEach(j=>{j.status="done";if(!j.completedAt)j.completedAt=Date.now();j.collected=paid?(+j.price||0):0;});
+  jobs.forEach(j=>{j.status="done";if(!j.completedAt)j.completedAt=Date.now();j.collected=paid?(+j.price||0):0;stampCleaner(j,db.users);});
   const c=custById(customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+jobs.map(j=>j.service).join(" + ")+" — "+(paid?"collected "+money(total):"unpaid")});}
   save();
   if(jobs.some(j=>j.planId))ensurePlanJobs();
-  queueReferral(customerId); // one draft per completion event, not per service in the slot
+  queueThanks(customerId); // one draft per completion event, not per service in the slot
   return jobs;
 }
 
@@ -3024,22 +2997,23 @@ function queueMsg(customerId,kind,body,why,extra){
     t:Date.now(),dueAt:today(),status:"queued"},extra||{});
   db.messages.push(m);return m;
 }
-/* Referral queue hook (no auto-send — this only ever calls queueMsg, same as every other rule).
-   Fired from completeJobFlow/completeSlot on a completed job. One draft per customer, ever: a
-   second completion is a no-op once a non-cancelled referral message already exists for them. */
-function queueReferral(customerId){
-  const r=db.settings.referral||{};
-  if(r.sendWhen!=="done")return null;
+/* Thank-you queue hook (owner order 2026-08-20; no auto-send — this only ever calls queueMsg,
+   same as every other rule). Fired from completeJobFlow/completeSlot on a completed job: ONE
+   message carrying the thanks, the review ask, and the referral offer together — it replaced
+   the separate review-after-done and referral drafts. One per customer, ever: a second
+   completion is a no-op once a non-cancelled thanks message already exists for them. */
+function queueThanks(customerId){
   const c=custById(customerId);
   if(!c||!cleanNum(c.phone))return null;
-  if(db.messages.some(m=>m.customerId===customerId&&m.kind==="referral"&&m.status!=="cancelled"))return null;
-  const link=referralLink(customerId);if(!link)return null;
-  const biz=db.settings.business||{};
-  const body=String(r.template||"")
-    .replace(/\{customer_name\}/g,firstName(c.name))
-    .replace(/\{company_name\}/g,biz.name||"Seva's Services")
-    .replace(/\{referral_link\}/g,link);
-  const m=queueMsg(customerId,"referral",body);save();return m;
+  if(db.messages.some(m=>m.customerId===customerId&&(m.kind==="thanks"||m.kind==="referral")&&m.status!=="cancelled"))return null;
+  const r=db.settings.referral||{};
+  const review=((db.settings.automation||{}).reviewLink||"").trim();
+  const rlink=r.sendWhen!=="off"?referralLink(customerId):"";
+  let body="Hey "+firstName(c.name)+"! Thank you for letting us take care of your windows — it was a pleasure working with you.";
+  if(review)body+="\n\nIf you were happy with how everything turned out, a quick review would mean a lot to us: "+review;
+  if(rlink)body+="\n\nAnd if you know anyone who could use our services, tap the link below and pop in their info — when they book, you both get $"+(+r.youGet||50)+" off: "+rlink;
+  const m=queueMsg(customerId,"thanks",body,"Job completed — thanks + review + referral");
+  save();return m;
 }
 /* The rules engine. Deterministic and idempotent: every rule refuses to queue when a matching
    draft already exists, so app-open and the button can both call it as often as they like. */
@@ -3060,17 +3034,12 @@ function runAutomations(){
       "Quoted, quiet "+Math.floor((now-quiet)/day)+"d — try "+(tries.length+1)+" of "+maxTries);
     n++;
   });
-  // b. Job wrapped in the last week → ask for a review. Once per customer, ever.
+  // b. Job wrapped in the last week → the combined thank-you (thanks + review + referral).
+  // Safety net for jobs completed on a device running old code — the Done flows queue it live.
   if(a.reviewAskAfterDone)db.jobs.filter(j=>j.status==="done").forEach(j=>{
     const doneAt=+j.completedAt||(j.date?new Date(j.date+"T12:00:00").getTime():0);
     if(!doneAt||now-doneAt>7*day)return;
-    const c=custById(j.customerId);
-    if(!c||!c.phone)return;
-    if(kindMsgs(c.id,"review").length)return;
-    const link=(a.reviewLink||"").trim();
-    queueMsg(c.id,"review",fillVars(tplBody("review"),c,j)+(link?" "+link:""),
-      "Finished "+j.service+" "+fmtDateShort(j.date)+" — never asked for a review");
-    n++;
+    if(queueThanks(j.customerId))n++;
   });
   // c. Job tomorrow → reminder today. Keyed customer+kind+job date, so re-runs never double up.
   const tom=offset(1);
