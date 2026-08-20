@@ -114,6 +114,9 @@
   body.rep .nav a[data-view="plans"],body.rep .nav a[data-view="messages"],
   body.rep .nav a[data-view="team"],body.rep .nav a[data-view="reports"],
   body.rep .nav a[data-view="settings"]{display:none}
+  /* technician: no leads — his day and his money only. Square is the owner's alone (owner order 2026-08-19) */
+  body.tech .nav a[data-view="leads"]{display:none}
+  body.rep .nav-square{display:none}
   .nav-square{display:flex;align-items:center;gap:12px;padding:9px 12px;margin:0 12px 8px;border-radius:9px;
     color:var(--muted);font-weight:600;font-size:14px}
   .nav-square:hover{background:var(--hover);color:var(--ink);text-decoration:none}
@@ -269,6 +272,16 @@
   .week-card .wp{font-size:11.5px;font-weight:800;margin-top:2px}
   .wk-item{display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:rgba(255,255,255,.9)}
   .week-empty{color:var(--faint);font-size:11.5px;text-align:center;padding:14px 0;font-style:italic}
+  /* month view (owner order 2026-08-19): per-day done/booked counts at a glance */
+  .mo-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:12px}
+  .mo-dow{text-align:center;font-size:11px;color:var(--faint);font-weight:700;padding:2px 0}
+  .mo-cell{border:1px solid var(--line);border-radius:10px;min-height:54px;padding:6px 7px;cursor:pointer}
+  .mo-cell:hover{background:var(--hover)}
+  .mo-cell.empty{border:0;cursor:default;background:transparent}
+  .mo-cell.today{border-color:var(--brand)}
+  .mo-cell.quiet .mo-d{color:var(--faint)}
+  .mo-d{font-size:12px;font-weight:700}
+  .mo-n{margin-top:5px;font-size:12.5px;font-weight:800;color:var(--brand)}
   /* ---------- Job form crew picker ---------- */
   .crew-row{display:flex;gap:12px;flex-wrap:wrap}
   .crew-chk{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;cursor:pointer}
@@ -717,7 +730,7 @@ const DEFAULT_SETTINGS=()=>({
   ownerPin:"",   // "" = off. Deterrent on the owner/manager tile in the who-picker, not security.
   tier:"business",
   terms:{cancelFeePct:20,text:"1. Service — our technician will make every effort to leave every window clean and clear. Results still depend on the condition of the glass: hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, so 100% perfect results cannot be guaranteed.\n"+
-    "2. Touch-ups — if we missed a spot and it's a reasonable ask, let us know and we'll gladly come back to touch it up free of charge. Free touch-ups are available only once the service has been paid in full.\n"+
+    "2. Touch-ups — if we missed a spot and it's a reasonable ask, point it out to the technician on-site within 15 minutes of the job being completed and we'll gladly redo it free of charge. Once the crew has left, the work is considered accepted.\n"+
     "3. Payment — payment is due upon completion of the service, or before, unless agreed otherwise in writing.\n"+
     "4. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
     "5. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
@@ -836,6 +849,8 @@ function normalize(r){
   // migrate the older default terms to the expanded 7-section wording (2026-08-19) —
   // the old payment line is the fingerprint; owner-customized terms never carry it verbatim
   if(s.terms.text.indexOf("6. Payment — payment is due on completion of the work")>=0)s.terms.text=d.terms.text;
+  // v2 → v3: touch-ups became on-site-within-15-minutes (no free come-backs) — same fingerprint idea
+  if(s.terms.text.indexOf("we'll gladly come back to touch it up free of charge")>=0)s.terms.text=d.terms.text;
   s.referral=Object.assign({},d.referral,s.referral||{});
   // one-time migration off the older default pairs — owner set the offer to $50/$50 (2026-08-17).
   // Only the known legacy pairs move; an owner-typed custom amount is never touched.
@@ -1037,6 +1052,9 @@ function jobCommission(j){ // {userId,amount} the job actually owes, or null if 
   const c=jobCredits(j)[0];
   return c?{userId:c.userId,amount:c.amount}:null;
 }
+/* Owner order 2026-08-19: commission is EARNED only once the job is paid in full — a done-but-
+   unpaid job keeps its sale credit on the leaderboard, but owes $0 until the money is collected. */
+function jobPaid(j){return j.status==="done"&&(+j.collected||0)>=(+j.price||0);}
 /* Top Salespeople — done jobs in a period, credited per job via jobCredits (splits, or the single
    stamped closer). `key` is a payPeriodKey() string ("YYYY-MM" or "YYYY"); omitted = this month. */
 function leaderboardRows(metric,key){
@@ -1045,7 +1063,7 @@ function leaderboardRows(metric,key){
   db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,ym)).forEach(j=>{
     jobCredits(j).forEach(cr=>{
       const o=byUser[cr.userId]=byUser[cr.userId]||{sales:0,count:0,comm:0};
-      o.sales+=cr.salesShare;o.comm+=cr.amount;o.count+=1;
+      o.sales+=cr.salesShare;o.comm+=jobPaid(j)?cr.amount:0;o.count+=1;
     });
   });
   return Object.entries(byUser).map(([uid,v])=>{
@@ -1063,12 +1081,13 @@ function repCommRows(userId,key){
   db.jobs.forEach(j=>{
     if(j.status==="cancelled"||!jobInPeriod(j.date,key))return;
     jobCredits(j).filter(cr=>cr.userId===userId).forEach(cr=>{
-      rows.push({job:j,amount:cr.amount,done:j.status==="done"});
+      rows.push({job:j,amount:cr.amount,done:j.status==="done",paid:jobPaid(j)});
     });
   });
   rows.sort((a,b)=>(a.job.date||"").localeCompare(b.job.date||""));
   return {rows,
-    doneTotal:rows.filter(r=>r.done).reduce((s,r)=>s+r.amount,0),
+    doneTotal:rows.filter(r=>r.paid).reduce((s,r)=>s+r.amount,0),
+    unpaidTotal:rows.filter(r=>r.done&&!r.paid).reduce((s,r)=>s+r.amount,0),
     bookedTotal:rows.filter(r=>!r.done).reduce((s,r)=>s+r.amount,0)};
 }
 /* Today strip: today's job count + expected revenue (booked scheduled + collected done). */
@@ -1105,7 +1124,10 @@ function activityFeed(){
 const REP_VIEWS=["dashboard","schedule","leads"]; // everything else is office work
 function whoUser(){const u=userById(uiPref().who);return (u&&u.active!==false)?u:null;}
 function isRep(){const u=whoUser();return !!u&&(u.role==="sales"||u.role==="tech");}
-function visibleViews(){return isRep()?REP_VIEWS.slice():Object.keys(VIEWS);}
+function visibleViews(){ // a technician works his day — no leads, no sales screens
+  const u=whoUser();
+  if(u&&u.role==="tech")return["dashboard","schedule"];
+  return isRep()?REP_VIEWS.slice():Object.keys(VIEWS);}
 function needsPin(u){return !!(db.settings.ownerPin)&&!!u&&(u.role==="owner"||u.role==="manager");}
 /* Called after the person changes: a screen they can no longer reach falls back to Home. */
 function applyWhoDefaults(){
@@ -1176,6 +1198,7 @@ function render(){
   const me=whoUser();
   document.body.classList.toggle("picking",!me);
   document.body.classList.toggle("rep",isRep());
+  document.body.classList.toggle("tech",!!me&&me.role==="tech");
   if(!me){renderWhoPicker();return;} // nobody claimed this device yet
   if(!visibleViews().includes(view))view="dashboard";
   $("#c-msg").textContent=queuedMessages().length;
@@ -1356,7 +1379,7 @@ function repCommRow(row){
     '<div style="flex:1;min-width:0"><div class="nm">'+esc(c?c.name:"—")+'</div>'+
       '<div class="sub">'+esc(j.service)+' · '+esc(fmtDateShort(j.date))+'</div></div>'+
     '<div class="money" style="margin-right:10px">'+esc(money2(row.amount))+'</div>'+
-    '<span class="badge b-'+(row.done?"done":"scheduled")+'">'+(row.done?"✓ done":"booked")+'</span>'+
+    '<span class="badge b-'+(row.paid?"done":"scheduled")+'">'+(row.paid?"✓ paid":(row.done?"unpaid":"booked"))+'</span>'+
   '</div>';
 }
 function repMoneyPanel(me){
@@ -1369,6 +1392,7 @@ function repMoneyPanel(me){
       '<div class="l">Commission '+(repCommOpen?"▾":"▸")+'</div><div class="n">'+esc(money2(r.comm))+'</div></div>';
   const drill=repCommOpen?'<div style="margin-top:10px">'+
       (cd.rows.length?cd.rows.map(repCommRow).join(""):'<div class="sub" style="font-style:italic">No commission jobs this month.</div>')+
+      (cd.unpaidTotal>0?'<div class="sub" style="padding:2px 0 0 4px;font-style:italic">Done, waiting on payment: '+esc(money2(cd.unpaidTotal))+'</div>':'')+
       (cd.bookedTotal>0?'<div class="sub" style="padding:2px 0 0 4px;font-style:italic">Coming up (booked, not yet earned): '+esc(money2(cd.bookedTotal))+'</div>':'')+
     '</div>':'';
   return '<div class="panel"><h2>My money<span class="pill">'+
@@ -1428,7 +1452,10 @@ function renderRepHome(){
   if(!me){renderWhoPicker();return;}
   $("#content").innerHTML=
     heroGreetHTML()+
-    repLeaderPanel(me)+repMoneyPanel(me)+repDayPanel(me)+repLeadsPanel(me);
+    // A technician has no sales race and no leads — his own money and his day, nobody else's numbers.
+    (me.role==="tech"
+      ?repMoneyPanel(me)+repDayPanel(me)
+      :repLeaderPanel(me)+repMoneyPanel(me)+repDayPanel(me)+repLeadsPanel(me));
   const m=$("#rep-metric");if(m)m.onchange=()=>{repMetric=m.value;renderRepHome();};
   const p=$("#rep-period");if(p)p.onchange=()=>{repPeriod=p.value;renderRepHome();};
   const cc=$("#rep-comm-chip");if(cc)cc.onclick=()=>{repCommOpen=!repCommOpen;renderRepHome();};
@@ -1506,24 +1533,32 @@ function uncompleteJob(id){
 /* --- rendering --- */
 function schedHeader(){
   const d=new Date(schedDay+"T12:00:00"); // noon guard — no UTC rollover
-  const dow=d.toLocaleDateString(undefined,{weekday:"long"});
-  const date=d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
+  const month=schedView==="month";
+  const mk=schedDay.slice(0,7);
+  // Owner order 2026-08-19: month view's headline is the DONE count, not revenue.
+  const doneN=month?db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===mk).length:0;
+  const dow=month?String(d.getFullYear()):d.toLocaleDateString(undefined,{weekday:"long"});
+  const date=month?d.toLocaleDateString(undefined,{month:"long"}):d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
   const rev=dayRev(schedDay);
   const step=schedView==="week"?7:1;
+  const sub=month
+    ?'<span style="color:var(--brand);font-weight:800">'+doneN+'</span> job'+(doneN===1?"":"s")+' completed this month'+
+      (mk!==today().slice(0,7)?' · <button class="btn sm" data-dnav="0">Today</button>':'')
+    :'Total rev: <span style="color:var(--brand);font-weight:800">'+money(rev)+'</span>'+
+      (schedDay!==today()?' · <button class="btn sm" data-dnav="0">Today</button>':'');
   return '<div class="tl-head">'+
     '<div class="tlh-wrap">'+
       '<div class="tlh-dow">'+esc(dow)+'</div>'+
       '<div class="tlh-date">'+esc(date)+'</div>'+
-      '<div class="tl-rev">Total rev: <span style="color:var(--brand);font-weight:800">'+money(rev)+'</span>'+
-        (schedDay!==today()?' · <button class="btn sm" data-dnav="0">Today</button>':'')+
-      '</div>'+
+      '<div class="tl-rev">'+sub+'</div>'+
     '</div>'+
     '<button class="nb" data-dnav="-'+step+'" aria-label="Back">‹</button>'+
     '<button class="nb" data-dnav="'+step+'" aria-label="Forward">›</button>'+
-    '<div class="fpill">'+(schedView==="day"?"Day":"7 days")+' ⌄'+
+    '<div class="fpill">'+(schedView==="day"?"Day":schedView==="week"?"7 days":"Month")+' ⌄'+
       '<select id="sched-view" aria-label="Schedule view">'+
         '<option value="day"'+(schedView==="day"?" selected":"")+'>Day</option>'+
         '<option value="week"'+(schedView==="week"?" selected":"")+'>7 days</option>'+
+        '<option value="month"'+(schedView==="month"?" selected":"")+'>Month</option>'+
       '</select></div>'+
   '</div>';
 }
@@ -1544,7 +1579,7 @@ function tlCard(j){
   const done=j.status==="done";
   const range=j.time?tlTimeRange(j.time):"";
   return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
-    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+(j.termsAcceptedAt?" "+confCk():"")+'</div>'+
+    '<div class="n">'+esc(c.name)+(!done&&j.termsAcceptedAt?" "+confCk():"")+'</div>'+
     '<div class="s">'+esc(j.service)+'</div>'+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
     '<div class="p">'+money2(j.price)+'</div>'+
@@ -1561,7 +1596,7 @@ function tlGroupCard(g){
   const range=j.time?tlTimeRange(j.time):"";
   const rows=g.jobs.map(x=>'<div class="tl-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
   return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
-    '<div class="n">'+(done?"✓ ":"")+esc(c.name)+(confirmed?" "+confCk():"")+'</div>'+
+    '<div class="n">'+esc(c.name)+(!done&&confirmed?" "+confCk():"")+'</div>'+
     rows+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
     '<div class="p">'+money2(g.total)+'</div>'+
@@ -1586,7 +1621,7 @@ function weekCard(j){
   const done=j.status==="done";
   return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
-    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+(j.termsAcceptedAt?" "+confCk():"")+'</div>'+
+    '<div class="wn">'+esc(c.name)+(!done&&j.termsAcceptedAt?" "+confCk():"")+'</div>'+
     '<div class="wp">'+money2(j.price)+'</div>'+
   '</div>';
 }
@@ -1598,7 +1633,7 @@ function weekGroupCard(g){
   const rows=g.jobs.map(x=>'<div class="wk-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
   return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
-    '<div class="wn">'+(done?"✓ ":"")+esc(c.name)+(confirmed?" "+confCk():"")+'</div>'+
+    '<div class="wn">'+esc(c.name)+(!done&&confirmed?" "+confCk():"")+'</div>'+
     rows+
     '<div class="wp">'+money2(g.total)+'</div>'+
   '</div>';
@@ -1614,18 +1649,48 @@ function renderWeek(){
   }).join("");
   return '<div class="week-wrap"><div class="week-grid">'+cols+'</div></div>';
 }
+/* Month grid: one cell per day, done/total job count only — a glance tool, not a booking surface.
+   Tapping a day jumps to that day's timeline. */
+function renderMonth(){
+  const base=new Date(schedDay+"T12:00:00");
+  const y=base.getFullYear(),m=base.getMonth();
+  const startDow=new Date(y,m,1,12).getDay();
+  const dim=new Date(y,m+1,0).getDate();
+  const t=today();
+  let cells="";
+  for(let i=0;i<startDow;i++)cells+='<div class="mo-cell empty"></div>';
+  for(let dd=1;dd<=dim;dd++){
+    const iso=y+"-"+String(m+1).padStart(2,"0")+"-"+String(dd).padStart(2,"0");
+    const jobs=dayJobs(iso);
+    const doneN=jobs.filter(j=>j.status==="done").length;
+    cells+='<div class="mo-cell'+(iso===t?" today":"")+(jobs.length?"":" quiet")+'" data-mday="'+iso+'">'+
+      '<div class="mo-d">'+dd+'</div>'+
+      (jobs.length?'<div class="mo-n">'+doneN+'/'+jobs.length+'</div>':'')+
+    '</div>';
+  }
+  const dows=["S","M","T","W","T","F","S"].map(x=>'<div class="mo-dow">'+x+'</div>').join("");
+  return '<div class="panel"><div class="mo-grid">'+dows+cells+'</div>'+
+    '<div class="hint" style="padding:0 12px 10px">done / booked per day — tap a day to open it</div></div>';
+}
 function renderSchedule(){
   if(schedView==="week"&&!schedAnchor)schedAnchor=schedDay; // pin the strip's start once
-  $("#content").innerHTML=schedHeader()+(schedView==="week"?renderWeek():renderDayTimeline());
+  $("#content").innerHTML=schedHeader()+
+    (schedView==="week"?renderWeek():schedView==="month"?renderMonth():renderDayTimeline());
   document.querySelectorAll("[data-dnav]").forEach(b=>b.onclick=()=>{
     const delta=+b.dataset.dnav;
     if(!delta){schedDay=today();schedAnchor=schedView==="week"?today():null;}
+    else if(schedView==="month"){ // ‹ › page whole calendar months
+      const d=new Date(schedDay+"T12:00:00");d.setDate(1);d.setMonth(d.getMonth()+(delta>0?1:-1));
+      schedDay=localISO(d);schedAnchor=null;
+    }
     else if(schedView==="week"){ // ‹ › page the whole strip; focus follows to its first day
       const d=new Date((schedAnchor||schedDay)+"T12:00:00");d.setDate(d.getDate()+delta);
       schedAnchor=localISO(d);schedDay=schedAnchor;
     }else{const d=new Date(schedDay+"T12:00:00");d.setDate(d.getDate()+delta);schedDay=localISO(d);schedAnchor=null;}
     renderSchedule();
   });
+  document.querySelectorAll("[data-mday]").forEach(el=>el.onclick=()=>{
+    schedDay=el.dataset.mday;schedView="day";schedAnchor=null;uiSet({schedView});renderSchedule();});
   const sv=$("#sched-view");if(sv)sv.onchange=()=>{schedView=sv.value;schedAnchor=null;uiSet({schedView});renderSchedule();};
   document.querySelectorAll("[data-jobcard]").forEach(el=>{
     // stopPropagation: a merged card nests one data-jobcard row per job (see tlGroupCard/
@@ -1706,7 +1771,9 @@ function jobForm(j,preset){
   // one now edits the whole visit: the single Service+Price pair is swapped for a checkbox row
   // per service (slotServicesField/applySlotServices), everything else in the form is unchanged.
   const siblings=j?slotSiblings(j):[];
-  const svcField=siblings.length>1?slotServicesField(siblings):svcPriceBlock;
+  // ANY existing booking gets the Services editor (owner order 2026-08-19: "I still cannot do
+  // window cleaning and gutter cleaning on the same booking") — ＋Add turns a solo job into a slot.
+  const svcField=siblings.length>=1?slotServicesField(siblings):svcPriceBlock;
   // NEW booking defaults to a NEW client (that's how most jobs get booked — door knocks).
   // The existing-client picker hides behind a link for the rare rebook. Editing an existing
   // job, or arriving with a preset customer (lead card / profile), keeps the picker as before.
@@ -1857,7 +1924,7 @@ function autoSaveJob(){
   if(!cid)return; // customer field cleared mid-edit — nothing sane to persist yet
   const curJob=db.jobs.find(x=>x.id===editJob);if(!curJob)return;
   const siblings=slotSiblings(curJob);
-  if(siblings.length>1){
+  if(siblings.length>=1){ // owner edit is ALWAYS slot mode now — the form renders svcRows even solo
     // Slot mode: the form has no single service/price — shared fields apply to every job in
     // the visit, then applySlotServices reconciles the checkbox rows (create/update/delete).
     const date=$("#jf-date").value||today();
@@ -1882,6 +1949,9 @@ function autoSaveJob(){
     document.querySelectorAll("#job-body [data-svc]").forEach(row=>{
       entries.push({service:row.dataset.svc,on:true,price:+row.querySelector(".slot-price").value||0});
     });
+    // ZERO rows means the form isn't showing the services editor (never a real "remove every
+    // service" — the last service leaves via the job's Delete button) — don't touch the jobs.
+    if(!entries.length){render();autoSaveToast();return;}
     // A sibling service whose row was ✕-removed from the list is an explicit off.
     siblings.forEach(sj=>{if(!entries.some(e=>e.service===sj.service))entries.push({service:sj.service,on:false,price:0});});
     const r=applySlotServices(cid,date,time,entries); // key is the NEW date/time — jobs already moved above
@@ -3280,7 +3350,7 @@ function payrollRows(key){
     const jobs=db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,key)&&jobCreditedTo(j,u.id));
     if(!jobs.length)return;
     const sales=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.salesShare:0);},0);
-    const commission=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.amount:0);},0);
+    const commission=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr&&jobPaid(j)?cr.amount:0);},0);
     const paid=payoutsSum(u.id,key);
     rows.push({user:u,jobsCount:jobs.length,sales,commission,paid,owed:Math.max(0,commission-paid),jobs});
   });
