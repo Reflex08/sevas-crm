@@ -892,6 +892,13 @@ function normalize(r){
     j.commissionPct=+j.commissionPct||0;
     j.termsAcceptedAt=+j.termsAcceptedAt||0;
   });
+  // Fiyin hired Mon 2026-08-17 4pm (owner order 2026-08-19): from that moment on, every job
+  // nobody else closed is his at 20% — including bookings made later (createJob applies the same
+  // rule live; this backfills + self-heals on every load). A job with its own closer or splits
+  // is never touched (a rep's credit stays a rep's).
+  {const fy=r.users.find(u=>u.role==="tech"&&/fiyin/i.test(u.name||"")&&u.active!==false);
+   if(fy&&!(+fy.commissionPct))fy.commissionPct=20;
+   r.jobs.forEach(j=>hireRuleStamp(r.users,j));}
   r.invoices.forEach(i=>{
     if(!Array.isArray(i.lines))i.lines=[];
     if(!Array.isArray(i.jobIds))i.jobIds=[];
@@ -1055,6 +1062,15 @@ function jobCommission(j){ // {userId,amount} the job actually owes, or null if 
 /* Owner order 2026-08-19: commission is EARNED only once the job is paid in full — a done-but-
    unpaid job keeps its sale credit on the leaderboard, but owes $0 until the money is collected. */
 function jobPaid(j){return j.status==="done"&&(+j.collected||0)>=(+j.price||0);}
+/* Fiyin's hire rule (owner order 2026-08-19): a closer-less, split-less, non-cancelled job dated
+   after Mon 2026-08-17 4pm belongs to the active tech named Fiyin at his configured rate. */
+function hireRuleStamp(users,j){
+  if(j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled")return;
+  const dt=j.date||"";
+  if(!(dt>"2026-08-17"||(dt==="2026-08-17"&&(j.time||"")>="16:00")))return;
+  const fy=(users||[]).find(u=>u.role==="tech"&&/fiyin/i.test(u.name||"")&&u.active!==false);
+  if(fy){j.closerId=fy.id;j.commissionPct=+fy.commissionPct||20;}
+}
 /* Top Salespeople — done jobs in a period, credited per job via jobCredits (splits, or the single
    stamped closer). `key` is a payPeriodKey() string ("YYYY-MM" or "YYYY"); omitted = this month. */
 function leaderboardRows(metric,key){
@@ -1498,6 +1514,7 @@ function createJob(data){
     const c=custById(j.customerId),u=c&&c.ownerId?userById(c.ownerId):null;
     if(u&&(+u.commissionPct||0)>0){j.closerId=u.id;j.commissionPct=+u.commissionPct;}
   }
+  hireRuleStamp(db.users,j); // still nobody's? From Fiyin's hire moment on, it's his (20%)
   db.jobs.push(j);save();return j;
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
