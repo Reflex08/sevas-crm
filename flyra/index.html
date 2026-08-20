@@ -886,6 +886,7 @@ function normalize(r){
     j.closerId=j.closerId?+j.closerId||null:null;
     j.commissionPct=+j.commissionPct||0;
     j.termsAcceptedAt=+j.termsAcceptedAt||0;
+    if(j.settledBy&&typeof j.settledBy!=="object")delete j.settledBy;
   });
   // Fiyin hired Mon 2026-08-17 4pm; his pay is a CLEANING commission (owner order 2026-08-20):
   // stamped when a job goes Done, backfilled here for jobs finished since the hire moment.
@@ -3017,7 +3018,15 @@ function thanksTemplate(){ // token form of the post-job thank-you — ONE sourc
 function queueThanks(customerId){
   const c=custById(customerId);
   if(!c||!cleanNum(c.phone))return null;
-  if(db.messages.some(m=>m.customerId===customerId&&(m.kind==="thanks"||m.kind==="referral")&&m.status!=="cancelled"))return null;
+  // one thank-you per visit, not per lifetime: blocked only while one is already waiting, or a
+  // recent one (30 days) was sent/dismissed — a repeat clean months later gets thanked again
+  const recent=Date.now()-30*86400000;
+  if(db.messages.some(m=>m.customerId===customerId&&m.kind==="thanks"&&m.status!=="cancelled"&&
+    (m.status==="queued"||(+m.t||0)>recent)))return null;
+  // retire superseded queued drafts — the thank-you itself carries the review + referral asks
+  db.messages.forEach(m=>{
+    if(m.customerId===customerId&&(m.kind==="review"||m.kind==="referral")&&m.status==="queued")m.status="cancelled";
+  });
   const m=queueMsg(customerId,"thanks",blastBody(thanksTemplate(),c),"Job completed — thanks + review + referral");
   save();return m;
 }
@@ -3340,7 +3349,8 @@ function lastPayoutT(userId,key){const l=db.payouts.filter(p=>p.userId===userId&
 function payrollRows(key){
   const rows=[];
   activeUsers().forEach(u=>{
-    const jobs=db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,key)&&jobCreditedTo(j,u.id));
+    const jobs=db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,key)&&jobCreditedTo(j,u.id))
+      .sort((a,b)=>(a.date||"").localeCompare(b.date||"")); // chronological (owner order 2026-08-20)
     if(!jobs.length)return;
     const sales=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.salesShare:0);},0);
     const commission=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr&&jobPaid(j)?cr.amount:0);},0);
@@ -3349,7 +3359,20 @@ function payrollRows(key){
   });
   return rows;
 }
-function markPaid(userId,amount,key){const p={id:db.seqPay++,t:Date.now(),userId,amount,period:key};db.payouts.push(p);save();return p;}
+function markPaid(userId,amount,key){
+  const p={id:db.seqPay++,t:Date.now(),userId,amount,period:key};
+  db.payouts.push(p);
+  // Stamp what this payout covered, so the drill-down can hide settled jobs (owner: "I don't
+  // want to see someone from a week ago I've already paid for"). Display-only — the money math
+  // stays payoutsSum-based. A job whose money wasn't collected yet isn't stamped: its commission
+  // wasn't in this payout, so it stays visible until a payout actually covers it.
+  db.jobs.forEach(j=>{
+    if(j.status!=="done"||!jobInPeriod(j.date,key)||!jobPaid(j)||!jobCreditedTo(j,userId))return;
+    j.settledBy=j.settledBy||{};
+    if(!j.settledBy[userId])j.settledBy[userId]=p.t;
+  });
+  save();return p;
+}
 function markPaidClick(userId){
   const key=payPeriodKey(payPeriod);
   const row=payrollRows(key).find(r=>r.user.id===userId);
@@ -3417,7 +3440,9 @@ function payrollRow(r,key){
       :(r.commission>0?'<span class="badge b-won">✓ Paid'+(lp?" "+esc(fmtDateShort(localISO(new Date(lp)))):"")+'</span>':''))+
   '</div>'+
   (open?'<div style="margin-bottom:8px">'+
-    r.jobs.map(j=>payrollJobLine(j,u.id)).join("")+
+    // only what's NOT yet paid out (owner order 2026-08-20) — settled jobs hide, totals below still count them
+    (r.jobs.filter(j=>!(j.settledBy&&j.settledBy[u.id])).map(j=>payrollJobLine(j,u.id)).join("")||
+      '<div class="sub" style="padding:0 0 0 52px;font-style:italic">All settled — nothing waiting.</div>')+
     '<div class="sub" style="padding:6px 0 0 52px;font-style:italic">Commission '+esc(money2(r.commission))+
       ' − paid '+esc(money2(r.paid))+' = owed '+esc(money2(r.owed))+'</div>'+
   '</div>':'');
