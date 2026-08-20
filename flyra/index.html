@@ -846,6 +846,9 @@ function normalize(r){
   // migrate the older default terms to the expanded 7-section wording (2026-08-19) —
   // the old payment line is the fingerprint; owner-customized terms never carry it verbatim
   if(s.terms.text.indexOf("6. Payment — payment is due on completion of the work")>=0)s.terms.text=d.terms.text;
+  // v0 — the ORIGINAL one-liner default from when terms first shipped; it predates the numbered
+  // chain below and sat in the live db looking like custom text until 2026-08-20
+  if(s.terms.text.indexOf("Work is weather-dependent; we'll confirm the morning of.")>=0)s.terms.text=d.terms.text;
   // v2 → v3: touch-ups became on-site-within-15-minutes (no free come-backs) — same fingerprint idea
   if(s.terms.text.indexOf("we'll gladly come back to touch it up free of charge")>=0)s.terms.text=d.terms.text;
   // v3 → v4 (2026-08-20): expanded to 9 sections — payment methods, safety, liability
