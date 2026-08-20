@@ -3051,7 +3051,9 @@ function runAutomations(){
   });
   // b. Job wrapped in the last week → the combined thank-you (thanks + review + referral).
   // Safety net for jobs completed on a device running old code — the Done flows queue it live.
-  if(a.reviewAskAfterDone)db.jobs.filter(j=>j.status==="done").forEach(j=>{
+  // Unconditional (owner: "all automatic") — the review TOGGLE only ever gated the old
+  // review-only ask; the thank-you goes regardless, with the review line only when a link is set.
+  db.jobs.filter(j=>j.status==="done").forEach(j=>{
     const doneAt=+j.completedAt||(j.date?new Date(j.date+"T12:00:00").getTime():0);
     if(!doneAt||now-doneAt>7*day)return;
     if(queueThanks(j.customerId))n++;
@@ -4356,6 +4358,10 @@ function adoptCloud(remote){
   db=normalize(remote);
   localStorage.setItem(DBKEY,JSON.stringify(db));
   __snap=snapKeyMap(db); // merged-in records must never read as fresh local edits on the next save
+  // A job finished on ANOTHER device just synced in — its thank-you (and any other due drafts)
+  // should appear here without waiting for a reload. Idempotent, queue-only, so it's a free no-op
+  // when nothing is due.
+  runAutomations();
   render();
 }
 async function syncPull(){
@@ -4535,10 +4541,10 @@ document.addEventListener("keydown",e=>{
 });
 
 ensurePlanJobs(); // every active plan always has its next visit booked
-// The rules run on the first open of each day (they think in whole days, so more often is noise —
-// the Messages screen has a button to force a run). They only ever QUEUE drafts.
-let bootQueued=0;
-if(db.settings.automation.lastRun!==today()){bootQueued=runAutomations();stampAutoRun();}
+// The rules run on EVERY open (owner order 2026-08-20 — the once-a-day stamp made a job finished
+// after the morning open wait until tomorrow for its thank-you). Safe: every rule is idempotent
+// and only ever QUEUEs drafts, so extra runs are free no-ops.
+let bootQueued=runAutomations();stampAutoRun();
 applyWhoDefaults(); // rep phones open on their own crew filter, and never on an office screen
 render();
 if(bootQueued)toast(bootQueued+" draft"+(bootQueued===1?"":"s")+" queued — tap to send","ok");
