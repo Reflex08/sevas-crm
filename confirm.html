@@ -35,7 +35,7 @@
   .terms-body{display:none;margin-top:12px;background:#0d0e12;border:1px solid var(--line);border-radius:12px;padding:13px 15px}
   .terms-body.open{display:block}
   .terms-label{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
-  .terms-text{margin-top:8px;color:var(--muted);font-size:13px;white-space:pre-wrap}
+  .terms-text{margin-top:10px;color:var(--ink,#e8eaf0);font-size:15px;line-height:1.6;white-space:pre-wrap}
   .fee-line{margin-top:10px;font-weight:700;font-size:13px}
   .cta:disabled{opacity:.45;cursor:default}
   .cta{width:100%;margin-top:24px;border:0;border-radius:999px;background:var(--sky);color:var(--on-sky);
@@ -121,15 +121,19 @@ function parseData(){
     c:isFinite(+d.c)?+d.c:0
   };
 }
-var DEFAULT_TERMS="1. Service — our technician will make every effort to leave every window clean and clear. Results still depend on the condition of the glass: hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, so 100% perfect results cannot be guaranteed.\n"+
-  "2. Touch-ups — if we missed a spot and it's a reasonable ask, point it out to the technician on-site within 15 minutes of the job being completed and we'll gladly redo it free of charge. After our crew leaves the property, the job is considered accepted and complete — we do not return for free touch-ups.\n"+
-  "3. Payment — payment is due upon completion of the service, or before, unless agreed otherwise in writing. We accept cash, e-transfer, and card. If a balance is left unpaid, scheduled future visits may be paused until it is settled.\n"+
-  "4. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, pets secured, and nothing blocking ladders or walkways. Windows that cannot be safely accessed may be skipped and deducted from the price.\n"+
-  "5. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
-  "6. Safety — the technician may decline any window or area he judges unsafe (unstable footing, wasp nests, aggressive pets, damaged structures); any skipped work is deducted from the price.\n"+
-  "7. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
-  "8. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
-  "9. Liability — if something goes wrong that is our fault, our responsibility is limited to repairing the issue or refunding up to the amount paid for the service.\n\n"+
+var DEFAULT_TERMS="1. Services — we provide the exterior cleaning services listed on your booking confirmation (window cleaning, gutter cleaning, pressure washing). Only what is listed is included; anything extra requested on-site is quoted and agreed before we start it.\n"+
+  "2. Workmanship — our technician will make every effort to leave every window clean and clear, using professional equipment and methods appropriate for each surface.\n"+
+  "3. Glass condition — results depend on the condition of the glass: hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, so 100% perfect results cannot be guaranteed. Removing defects like these is restoration work, not cleaning, and is quoted separately.\n"+
+  "4. Touch-ups — if we missed a spot and it's a reasonable ask, point it out to the technician on-site within 15 minutes of the job being completed and we'll gladly redo it free of charge. After our crew leaves the property, the job is considered accepted and complete — we do not return for free touch-ups.\n"+
+  "5. Payment — payment is due upon completion of the service, or before, unless agreed otherwise in writing. We accept cash, e-transfer, and card. If a balance is left unpaid, scheduled future visits may be paused until it is settled.\n"+
+  "6. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, fragile items moved off ledges, and nothing blocking ladders or walkways. Windows that cannot be safely accessed may be skipped and deducted from the price.\n"+
+  "7. Pets & children — please keep pets and children away from work areas while we're on-site: ladders, hoses, and wet surfaces are in use.\n"+
+  "8. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
+  "9. Safety — the technician may decline any window or area judged unsafe (unstable footing, wasp nests, aggressive pets, damaged structures); any skipped work is deducted from the price.\n"+
+  "10. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
+  "11. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
+  "12. Concerns — if you believe something was damaged during the visit, tell us within 48 hours so we can make it right; issues reported later are hard to verify and may not be covered.\n"+
+  "13. Liability — if something goes wrong that is our fault, our responsibility is limited to repairing the issue or refunding up to the amount paid for the service.\n\n"+
   "Confirming this booking means you've read and agree to these terms.";
 function render(){
   var d=parseData();
