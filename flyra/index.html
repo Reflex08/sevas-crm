@@ -3006,17 +3006,19 @@ function queueMsg(customerId,kind,body,why,extra){
    message carrying the thanks, the review ask, and the referral offer together — it replaced
    the separate review-after-done and referral drafts. One per customer, ever: a second
    completion is a no-op once a non-cancelled thanks message already exists for them. */
+function thanksTemplate(){ // token form of the post-job thank-you — ONE source for the auto-queue AND the blast
+  const review=((db.settings.automation||{}).reviewLink||"").trim();
+  const r=db.settings.referral||{};
+  let b="Hey {customer_name}! Thank you for letting us take care of your windows — it was a pleasure working with you.";
+  if(review)b+="\n\nIf you were happy with how everything turned out, a quick review would mean a lot to us: "+review;
+  if(r.sendWhen!=="off")b+="\n\nAnd if you know anyone who could use our services, tap the link below and pop in their info — when they book, you both get $"+(+r.youGet||50)+" off: {referral_link}";
+  return b;
+}
 function queueThanks(customerId){
   const c=custById(customerId);
   if(!c||!cleanNum(c.phone))return null;
   if(db.messages.some(m=>m.customerId===customerId&&(m.kind==="thanks"||m.kind==="referral")&&m.status!=="cancelled"))return null;
-  const r=db.settings.referral||{};
-  const review=((db.settings.automation||{}).reviewLink||"").trim();
-  const rlink=r.sendWhen!=="off"?referralLink(customerId):"";
-  let body="Hey "+firstName(c.name)+"! Thank you for letting us take care of your windows — it was a pleasure working with you.";
-  if(review)body+="\n\nIf you were happy with how everything turned out, a quick review would mean a lot to us: "+review;
-  if(rlink)body+="\n\nAnd if you know anyone who could use our services, tap the link below and pop in their info — when they book, you both get $"+(+r.youGet||50)+" off: "+rlink;
-  const m=queueMsg(customerId,"thanks",body,"Job completed — thanks + review + referral");
+  const m=queueMsg(customerId,"thanks",blastBody(thanksTemplate(),c),"Job completed — thanks + review + referral");
   save();return m;
 }
 /* The rules engine. Deterministic and idempotent: every rule refuses to queue when a matching
@@ -3156,6 +3158,7 @@ let blastState={tpl:"review",body:BLAST_REVIEW_DEFAULT,q:"",selected:new Set(),s
 function blastTplBody(key){
   if(key==="review")return BLAST_REVIEW_DEFAULT;
   if(key==="referral")return (db.settings.referral||{}).template||"";
+  if(key==="postjob")return thanksTemplate(); // same message the Done flow queues automatically
   return blastCustomBody;
 }
 /* Per-client substitution for the blast's own tokens — deliberately just these three, not the
@@ -3186,7 +3189,7 @@ function blastClientRow(c){
 }
 function blastComposerHtml(){
   const st=blastState;
-  const opts=[["referral","Referral"],["review","Review request"],["custom","Custom"]]
+  const opts=[["referral","Referral"],["review","Review request"],["postjob","Post-job thank-you"],["custom","Custom"]]
     .map(([v,l])=>'<option value="'+v+'"'+(st.tpl===v?" selected":"")+'>'+l+'</option>').join("");
   const rows=blastClients().map(blastClientRow).join("");
   // body textarea only for Custom — canned templates are edited in their own menus, not here
