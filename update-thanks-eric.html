@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Patch — queue thank-you for Eric</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px;max-width:640px;margin:0 auto}
+pre{background:#15161c;padding:14px;border-radius:10px;white-space:pre-wrap}</style></head><body>
+<h2>Queue thank-you draft for Eric</h2>
+<pre id="log"></pre>
+<script>
+"use strict";
+const DBKEY="flyra.v1",FILE="flyra-db.json";
+const log=m=>{const el=document.getElementById("log");el.textContent=el.textContent+m+String.fromCharCode(10);};
+const cleanNum=p=>String(p||"").replace(/\D/g,"");
+const firstName=n=>String(n||"").trim().split(/\s+/)[0]||"";
+(async function(){
+try{
+  const tok=localStorage.getItem("flyra.synckey"),gid=localStorage.getItem("flyra.syncgist");
+  if(!tok||!gid){log("No sync token in this profile — open this page in the profile that runs the CRM.");return;}
+  const H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+  const g=await (await fetch("https://api.github.com/gists/"+gid,{headers:H})).json();
+  const f=g.files[FILE];
+  const db=JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+  const matches=db.customers.filter(c=>/^eric\b/i.test(String(c.name||"").trim()));
+  if(matches.length!==1){log("Expected exactly one client named Eric, found "+matches.length+": "+matches.map(c=>c.id+" "+c.name).join(", ")+" — aborting, nothing changed.");return;}
+  const c=matches[0];
+  if(!cleanNum(c.phone)){log(c.name+" has no phone number — a text draft would have nowhere to go. Aborting.");return;}
+  if((db.messages||[]).some(m=>m.customerId===c.id&&m.kind==="thanks"&&m.status!=="cancelled")){log(c.name+" already has a thank-you draft — nothing to do.");return;}
+  const now=Date.now();
+  // retire any old queued review/referral drafts so he doesn't get near-duplicates
+  let retired=0;
+  (db.messages||[]).forEach(m=>{
+    if(m.customerId===c.id&&(m.kind==="review"||m.kind==="referral")&&m.status==="queued"){m.status="cancelled";m.up=now;retired++;}
+  });
+  // body identical to the app's queueThanks()
+  const biz=db.settings.business||{};
+  const r=db.settings.referral||{};
+  const review=String((db.settings.automation||{}).reviewLink||"").trim();
+  let rlink="";
+  if(r.sendWhen!=="off"){
+    const payload={biz:biz.name||"",ph:cleanNum(biz.phone),ref:firstName(c.name),cid:c.id,
+      tg:+r.theyGet||0,yg:+r.youGet||0,gc:+r.giftCard||0};
+    rlink="https://reflex08.github.io/sevas-crm/referral.html?d="+
+      btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  }
+  let body="Hey "+firstName(c.name)+"! Thank you for letting us take care of your windows — it was a pleasure working with you.";
+  if(review)body+="\n\nIf you were happy with how everything turned out, a quick review would mean a lot to us: "+review;
+  if(rlink)body+="\n\nAnd if you know anyone who could use our services, tap the link below and pop in their info — when they book, you both get $"+(+r.youGet||50)+" off: "+rlink;
+  const d=new Date();
+  const todayISO=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  const id=Math.max(0,...(db.messages||[]).map(m=>+m.id||0),(+db.seqM||0)-1)+1;
+  db.messages=db.messages||[];
+  db.messages.push({id:id,customerId:c.id,dir:"out",kind:"thanks",body:body,
+    why:"Job completed — thanks + review + referral",t:now,dueAt:todayISO,status:"queued",up:now});
+  db.seqM=id+1;
+  db.updatedAt=now;
+  const localRaw=localStorage.getItem(DBKEY);
+  if(localRaw)localStorage.setItem(DBKEY+".backup-thanks-eric-"+now,localRaw);
+  localStorage.setItem(DBKEY,JSON.stringify(db));
+  const res=await fetch("https://api.github.com/gists/"+gid,{method:"PATCH",headers:H,
+    body:JSON.stringify({files:{[FILE]:{content:JSON.stringify(db)}}})});
+  log(res.ok?"Pushed to cloud OK":"Cloud push FAILED ("+res.status+")");
+  log("Queued thank-you draft for "+c.name+" (client #"+c.id+")"+(retired?" — retired "+retired+" old review/referral draft(s)":"")+".");
+  if(!review)log("Note: no review link is set in Settings > Automation, so the review line was left out.");
+  log("DONE — open the CRM > Messages and tap Send on his draft.");
+}catch(e){log("ERROR: "+e.message);}
+})();
+</script></body></html>
