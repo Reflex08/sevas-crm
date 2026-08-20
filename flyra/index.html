@@ -298,7 +298,8 @@
     background:#15161c;border-radius:20px 20px 0 0}
   .modal-head h3{margin:0;font-size:18px;font-weight:800}
   .modal-head .hsub{color:var(--muted);font-size:12.5px;font-weight:600;margin-top:2px}
-  .x{border:0;background:transparent;font-size:24px;color:var(--faint);line-height:1;padding:2px 7px;border-radius:8px}
+  .x{border:0;background:transparent;font-size:24px;color:var(--faint);line-height:1;border-radius:8px;
+    min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;margin:-8px -10px -8px 0}
   /* Required-field rejection: the modal shakes, missing inputs go red, one red line says what's missing. */
   @keyframes jf-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(4px)}}
   .modal.shake{animation:jf-shake .38s ease}
@@ -715,12 +716,13 @@ const DEFAULT_SETTINGS=()=>({
   smsNumber:"",  // Flyra's "custom number" — a label here, nothing dials it locally
   ownerPin:"",   // "" = off. Deterrent on the owner/manager tile in the who-picker, not security.
   tier:"business",
-  terms:{cancelFeePct:20,text:"1. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
-    "2. Best effort — our technician will do his best on every pane, but results depend on the condition of the glass. Hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, and perfect results cannot be guaranteed.\n"+
-    "3. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
-    "4. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
-    "5. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n"+
-    "6. Payment — payment is due on completion of the work unless agreed otherwise in writing.\n\n"+
+  terms:{cancelFeePct:20,text:"1. Service — our technician will make every effort to leave every window clean and clear. Results still depend on the condition of the glass: hard-water stains, oxidation, scratches, paint or sealant overspray, and blown seals (fog between panes) may not come off, so 100% perfect results cannot be guaranteed.\n"+
+    "2. Touch-ups — if we missed a spot and it's a reasonable ask, let us know and we'll gladly come back to touch it up free of charge. Free touch-ups are available only once the service has been paid in full.\n"+
+    "3. Payment — payment is due upon completion of the service, or before, unless agreed otherwise in writing.\n"+
+    "4. Access — every window being cleaned must be safely reachable at the time of service: gates unlocked, screens off or removable, sills clear, nothing blocking ladders or walkways.\n"+
+    "5. Pre-existing damage — we are not responsible for damage that existed before we arrived (chipped or cracked glass, failed seals, loose frames, worn screens, brittle caulking). Please point out fragile or damaged windows before work starts.\n"+
+    "6. Cancellations — free rescheduling up to 24 hours before the visit. Cancelling or rescheduling within 24 hours carries a {fee}% fee of the quoted price.\n"+
+    "7. Weather — if weather makes the work unsafe or ineffective, we'll reschedule together at no charge.\n\n"+
     "Confirming this booking means you've read and agree to these terms."},
   referral:{theyGet:50,youGet:50,giftCard:0,sendWhen:"done",
     template:"Hey there {customer_name}! Just reaching out to see if you know anyone who could benefit from our services. If you do, tap the link below and pop in their info — when they book, you both get a reward: {referral_link}"},
@@ -831,6 +833,9 @@ function normalize(r){
   s.terms=Object.assign({},d.terms,s.terms||{});
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
+  // migrate the older default terms to the expanded 7-section wording (2026-08-19) —
+  // the old payment line is the fingerprint; owner-customized terms never carry it verbatim
+  if(s.terms.text.indexOf("6. Payment — payment is due on completion of the work")>=0)s.terms.text=d.terms.text;
   s.referral=Object.assign({},d.referral,s.referral||{});
   // one-time migration off the older default pairs — owner set the offer to $50/$50 (2026-08-17).
   // Only the known legacy pairs move; an owner-typed custom amount is never touched.
@@ -4380,11 +4385,12 @@ const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sig
 const openModals=new Set(); // truth for "is this modal up" — never read the DOM's class for logic
 function openModal(id){openModals.add(id);const o=$("#"+id);if(o)o.classList.add("show");}
 let jobDiscardArm=0;
-function closeModal(id){
+function closeModal(id,force){
   // A NEW booking with something typed but requirements missing doesn't close on a stray tap —
   // it shakes and shows what's missing. Tapping off AGAIN within 4s discards on purpose (an
   // untouched form always closes instantly — accidental opens aren't punished).
-  if(id==="job-overlay"&&!editJob){
+  // The ✕ button is a DELIBERATE close, not a stray tap — it passes force and always closes.
+  if(id==="job-overlay"&&!editJob&&!force){
     if(openModals.has("job-overlay")){
       const touched=["jf-name","jf-phone","jf-street","jf-notes"].some(x=>{const el=$("#"+x);return el&&((el.value||"")+"").trim();})
         ||(+(($("#jf-price")||{}).value||0)>0)||(+(($("#jf-cust")||{}).value||0)>0);
@@ -4410,7 +4416,7 @@ function closeModal(id){
     if(editJob&&openModals.has("job-overlay"))openJob(editJob);
   }
 }
-function closeAllModals(){MODALS.forEach(closeModal);}
+function closeAllModals(){MODALS.forEach(id=>closeModal(id,true));}
 // A tap closes a modal only if it STARTED on the backdrop — a scroll drag that ends past the
 // modal's edge otherwise lands on the overlay and dismisses it mid-scroll on phones.
 let __pdBackdrop=null;
@@ -4418,7 +4424,7 @@ document.addEventListener("pointerdown",e=>{
   __pdBackdrop=(e.target&&e.target.classList&&e.target.classList.contains("overlay"))?e.target:null;},true);
 MODALS.forEach(id=>{const o=$("#"+id);if(!o)return;
   o.addEventListener("click",e=>{if(e.target===o&&__pdBackdrop===o)closeModal(id);});});
-document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>closeModal(b.dataset.close));
+document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>closeModal(b.dataset.close,true));
 
 /* ---------------- Drawer / global wiring ---------------- */
 function drawer(open){$("#drawer").classList.toggle("open",open);$("#drawer-veil").classList.toggle("show",open);}
