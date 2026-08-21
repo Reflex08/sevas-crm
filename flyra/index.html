@@ -114,8 +114,8 @@
   body.rep .nav a[data-view="plans"],body.rep .nav a[data-view="messages"],
   body.rep .nav a[data-view="team"],body.rep .nav a[data-view="reports"],
   body.rep .nav a[data-view="settings"]{display:none}
-  /* technician: no leads — his day and his money only. Square is the owner's alone (owner order 2026-08-19) */
-  body.tech .nav a[data-view="leads"]{display:none}
+  /* technician: no leads, no map — his day and his money only. Square is the owner's alone (owner order 2026-08-19) */
+  body.tech .nav a[data-view="leads"],body.tech .nav a[data-view="map"]{display:none}
   body.rep .nav-square{display:none}
   .nav-square{display:flex;align-items:center;gap:12px;padding:9px 12px;margin:0 12px 8px;border-radius:9px;
     color:var(--muted);font-weight:600;font-size:14px}
@@ -290,7 +290,7 @@
   .overlay.show{display:flex}
   body:has(.overlay.show){overflow:hidden} /* page behind a modal must not scroll */
   #cust-overlay{z-index:50} #job-overlay{z-index:60} #blast-overlay{z-index:65} #invoice-overlay,#plan-overlay{z-index:70}
-  #sign-overlay{z-index:80}
+  #sign-overlay,#pin-overlay{z-index:80}
   .modal{background:#15161c;border:1px solid var(--line);border-radius:20px;width:100%;max-width:640px;box-shadow:var(--shadow-lg);margin:auto 0}
   .modal.lg{max-width:760px} .modal.sm{max-width:520px}
   /* Sticky: the ✕ stays reachable however far the modal scrolls (owner: "I don't wanna scroll
@@ -386,6 +386,36 @@
   .mpill .n{font-variant-numeric:tabular-nums;color:var(--faint)}
   .mpill.active .n{color:var(--ink)}
 
+  /* ---------- Map (restored 2026-08-20 — owner: "steal it from Flyra, exactly") ---------- */
+  .map-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .map-bar .fcir{width:34px;height:34px;font-size:15px}
+  .mpill{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:999px;
+    border:1px solid var(--line);background:var(--panel);color:var(--muted);font-weight:700;font-size:12.5px}
+  .mpill:hover{background:var(--hover);color:var(--ink)}
+  .mpill.active{background:rgba(255,255,255,.1);color:var(--ink);border-color:rgba(255,255,255,.28)}
+  .mpill .d{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .mpill .n{font-variant-numeric:tabular-nums;color:var(--faint)}
+  .mpill.active .n{color:var(--ink)}
+  #map-canvas{height:calc(100vh - 150px);min-height:420px;border-radius:16px;border:1px solid var(--line);
+    overflow:hidden;background:#0d0e12;position:relative;z-index:0}
+  /* OSM ships only light tiles — invert + hue-rotate is the classic way to darken them without a paid style. */
+  .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.92) saturate(.72)}
+  .leaflet-container{background:#0d0e12;font:inherit}
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#15161c;color:var(--ink);
+    border:1px solid var(--line);box-shadow:var(--shadow-lg)}
+  .leaflet-popup-content{margin:12px 14px;font-size:13px;line-height:1.45}
+  .leaflet-container a.leaflet-popup-close-button{color:var(--faint)}
+  .leaflet-container a.leaflet-popup-close-button:hover{color:var(--ink)}
+  .leaflet-control-attribution{background:rgba(13,14,18,.82)!important;color:var(--faint)!important;font-size:10.5px}
+  .leaflet-control-attribution a{color:var(--muted)!important}
+  .leaflet-bar a,.leaflet-bar a:hover{background:#15161c;color:var(--ink);border-bottom-color:var(--line)}
+  .leaflet-bar a:hover{background:#1d1f27}
+  .pin-pop{min-width:196px}
+  .pin-pop .pp-note{margin-top:7px;color:var(--ink)}
+  .pin-pop .pp-cust{margin-top:5px;font-weight:800;color:var(--brand)}
+  .pin-pop .pp-when{margin-top:4px;color:var(--faint);font-size:11.5px;font-style:italic}
+  .pin-pop .pp-btns{display:flex;gap:7px;margin-top:11px}
+
   /* ---------- Toast ---------- */
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#15161c;color:var(--ink);
     border:1px solid var(--line);padding:12px 20px;border-radius:11px;opacity:0;transition:.25s;z-index:200;font-weight:700;
@@ -430,6 +460,7 @@
   <div class="brand">Flyr<em>a</em><small>Field service CRM</small></div>
   <nav class="nav" id="nav">
     <a data-view="dashboard" class="active"><span class="ic">▦</span> Dashboard</a>
+    <a data-view="map"><span class="ic">🗺️</span> Map</a>
     <a data-view="schedule"><span class="ic">🗓️</span> Schedule</a>
     <a data-view="leads"><span class="ic">🌱</span> Leads</a>
     <a data-view="customers"><span class="ic">👥</span> Clients</a>
@@ -494,6 +525,14 @@
     <button class="x" data-close="blast-overlay" aria-label="Close">&times;</button></div>
   <div class="modal-body" id="blast-body"></div>
   <div class="modal-foot" id="blast-foot"></div>
+</div></div>
+
+<!-- Map pin editor -->
+<div class="overlay" id="pin-overlay"><div class="modal sm">
+  <div class="modal-head"><div><h3 id="pin-title">Pin</h3><div class="hsub" id="pin-hsub"></div></div>
+    <button class="x" data-close="pin-overlay" aria-label="Close">&times;</button></div>
+  <div class="modal-body" id="pin-body"></div>
+  <div class="modal-foot" id="pin-foot"></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -684,6 +723,13 @@ const STAGES=[
   {id:"quoted",label:"Quoted",color:"#fbbf24"},
   {id:"won",label:"Won",color:"#34d399"},
   {id:"lost",label:"Lost",color:"#f98080"},
+];
+const PIN_STATUS=[
+  {id:"knock",label:"Knocked",color:"#f5a623"},
+  {id:"callback",label:"Call back",color:"#f98080"},
+  {id:"quoted",label:"Quoted",color:"#5ac8fa"},
+  {id:"won",label:"Won",color:"#34d399"},
+  {id:"no",label:"Not interested",color:"#6b7280"},
 ];
 const ROLE_META={owner:{label:"Owner",cls:"owner"},manager:{label:"Manager",cls:"manager"},
   sales:{label:"Sales",cls:"sales"},tech:{label:"Tech",cls:"tech"}};
@@ -910,8 +956,26 @@ function normalize(r){
   // tombstones: {id,t} per collection so a delete on one device survives a merge with a stale
   // copy from another — only collections a device can actually hard-delete need one.
   if(!r.deleted||typeof r.deleted!=="object")r.deleted={};
-  for(const k of ["jobs","customers","plans","messages","payouts","users"])
+  for(const k of ["jobs","customers","plans","messages","payouts","users","pins"])
     if(!Array.isArray(r.deleted[k]))r.deleted[k]=[];
+  r.pins.forEach(p=>{p.lat=+p.lat||0;p.lng=+p.lng||0;
+    if(!(+p.createdAt))p.createdAt=+p.t||0;}); // pins predate createdAt — tombstones need it
+  // settle-stamp backfill (one-time era, 2026-08-20): payouts logged BEFORE per-job settlement
+  // existed left their jobs unstamped — the owner's practice was always "Mark paid clears what's
+  // owed", so any job paid-in-full and finished before that user's last pre-epoch payout counts
+  // as settled. Payouts after the epoch stamp themselves in markPaid.
+  {const SETTLE_EPOCH=new Date("2026-08-21T00:00:00-04:00").getTime();
+   const lastPay={};
+   (r.payouts||[]).forEach(p=>{if((+p.t||0)<SETTLE_EPOCH)lastPay[p.userId]=Math.max(lastPay[p.userId]||0,+p.t||0);});
+   (r.jobs||[]).forEach(j=>{
+     if(j.status!=="done"||!jobPaid(j))return;
+     jobCredits(j).forEach(cr=>{
+       const t0=lastPay[cr.userId];
+       if(!t0||!(+j.completedAt)||(+j.completedAt)>t0)return;
+       j.settledBy=j.settledBy||{};
+       if(!j.settledBy[cr.userId])j.settledBy[cr.userId]=t0;
+     });
+   });}
   // per-row guards — a hand-edited or older file must never crash a renderer
   r.customers.forEach(c=>{
     if(!Array.isArray(c.tags))c.tags=[];
@@ -1152,7 +1216,8 @@ function repCommRows(userId,key){
   db.jobs.forEach(j=>{
     if(j.status==="cancelled"||!jobInPeriod(j.date,key))return;
     jobCredits(j).filter(cr=>cr.userId===userId).forEach(cr=>{
-      rows.push({job:j,amount:cr.amount,done:j.status==="done",paid:jobPaid(j)});
+      rows.push({job:j,amount:cr.amount,done:j.status==="done",paid:jobPaid(j),
+        settled:!!(j.settledBy&&j.settledBy[userId])});
     });
   });
   rows.sort((a,b)=>(a.job.date||"").localeCompare(b.job.date||""));
@@ -1192,7 +1257,7 @@ function activityFeed(){
    `who` is the person holding THIS phone. It lives in uiPref (localStorage), never in db —
    the db syncs between devices, the person at each device does not. A stale or deactivated id
    resolves to null, which puts the picker back up. */
-const REP_VIEWS=["dashboard","schedule","leads"]; // everything else is office work
+const REP_VIEWS=["dashboard","map","schedule","leads"]; // everything else is office work
 function whoUser(){const u=userById(uiPref().who);return (u&&u.active!==false)?u:null;}
 function isRep(){const u=whoUser();return !!u&&(u.role==="sales"||u.role==="tech");}
 function visibleViews(){ // a technician works his day — no leads, no sales screens
@@ -1260,7 +1325,7 @@ function paintWhoFoot(){
 
 /* ---------------- Router ---------------- */
 let view=uiPref().view||"dashboard";
-const VIEWS={dashboard:renderDashboard,schedule:renderSchedule,leads:renderLeads,
+const VIEWS={dashboard:renderDashboard,map:renderMap,schedule:renderSchedule,leads:renderLeads,
   customers:renderCustomers,plans:renderPlans,messages:renderMessages,
   team:renderTeam,reports:renderReports,settings:renderSettings};
 function setView(v){if(!VIEWS[v]||!visibleViews().includes(v))v="dashboard";view=v;uiSet({view:v});render();}
@@ -1275,7 +1340,7 @@ function render(){
   $("#c-msg").textContent=queuedMessages().length;
   document.querySelectorAll("#nav a").forEach(a=>a.classList.toggle("active",a.dataset.view===view));
   // no ＋ on settings/reports (nothing to add), team (payroll — owner order), or messages in rep mode (blast is owner-only)
-  document.body.classList.toggle("no-fab",view==="settings"||view==="reports"||view==="team"||(view==="messages"&&isRep()));
+  document.body.classList.toggle("no-fab",view==="settings"||view==="reports"||view==="team"||view==="map"||(view==="messages"&&isRep()));
   paintWhoFoot();
   (view==="dashboard"&&isRep()?renderRepHome:VIEWS[view])();
 }
@@ -1491,7 +1556,10 @@ function repMoneyPanel(me){
   // Commission comes from repCommRows, not the leaderboard — a tech's CLEANING pay never enters
   // the sales race but absolutely belongs in his money. For a rep the two totals are identical.
   const comm=cd.doneTotal;
-  const paid=payoutsSum(me.id,key),owed=Math.max(0,comm-paid);
+  // settlement stamps via the SAME helper the owner's payroll uses — the rep's To-pay number
+  // and the owner's can never disagree, and neither moves when a period selector moves
+  const pr=payrollRows(key).find(x=>x.user.id===me.id)||{owed:0,settled:0};
+  const paid=pr.settled,owed=pr.owed;
   const chip=(l,n)=>'<div class="schip"><div class="l">'+esc(l)+'</div><div class="n">'+esc(n)+'</div></div>';
   const commChip='<div class="schip" id="rep-comm-chip" style="cursor:pointer">'+
       '<div class="l">Commission '+(repCommOpen?"▾":"▸")+'</div><div class="n">'+esc(money2(comm))+'</div></div>';
@@ -1570,6 +1638,197 @@ function renderRepHome(){
     if(completeJobFlow(+b.dataset.repdone))renderRepHome();else toast("Left as booked","ok");});
   document.querySelectorAll("[data-jobcard]").forEach(el=>el.onclick=()=>openJob(+el.dataset.jobcard));
   document.querySelectorAll("[data-repcust]").forEach(el=>el.onclick=()=>openCustProfile(+el.dataset.repcust));
+}
+/* ---------------- Map (restored 2026-08-20 — owner: "steal it from Flyra, exactly") ----------------
+   The only screen that touches the network, and only while it is open:
+   unpkg for Leaflet itself, tile.openstreetmap.org for tiles, the geolocation API on demand. */
+const pinMeta=id=>PIN_STATUS.find(s=>s.id===id)||PIN_STATUS[0];
+let mapInst=null,pinLayer=null,mapFilter="all",leafletPromise=null;
+
+/* Cached promise = one download per session. A failure clears the cache so re-opening retries. */
+function loadLeaflet(){
+  if(window.L)return Promise.resolve(window.L);
+  if(leafletPromise)return leafletPromise;
+  leafletPromise=new Promise((res,rej)=>{
+    try{
+      const head=document.head||document.body;
+      const css=document.createElement("link");
+      css.rel="stylesheet";css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      head.appendChild(css);
+      const s=document.createElement("script");
+      s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      s.onload=()=>window.L?res(window.L):rej(new Error("Leaflet loaded without window.L"));
+      s.onerror=()=>rej(new Error("Leaflet download failed"));
+      head.appendChild(s);
+    }catch(e){rej(e);}
+  });
+  leafletPromise.catch(()=>{leafletPromise=null;});
+  return leafletPromise;
+}
+
+function visiblePins(){return mapFilter==="all"?db.pins.slice():db.pins.filter(p=>p.status===mapFilter);}
+function pinCounts(){const c={};db.pins.forEach(p=>c[p.status]=(c[p.status]||0)+1);return c;}
+
+/* --- pin data ops (the modal calls these, so the gate can drive the same code path) --- */
+function addPin(lat,lng,status,note,customerId){
+  const p={id:db.seqPin++,lat:+(+lat).toFixed(5),lng:+(+lng).toFixed(5),
+    status:PIN_STATUS.some(s=>s.id===status)?status:"knock",
+    note:note||"",customerId:customerId||null,t:Date.now(),createdAt:Date.now(),userId:(whoUser()||{}).id||1};
+  db.pins.push(p);save();return p;
+}
+function updatePin(id,patch){const p=db.pins.find(x=>x.id===id);if(!p)return null;
+  Object.assign(p,patch);save();return p;}
+function deletePin(id){tomb("pins",id);db.pins=db.pins.filter(p=>p.id!==id);save();}
+/* Pin -> lead: a real customer row at stage "new", linked back to the pin both ways. */
+function pinToLead(id){
+  const p=db.pins.find(x=>x.id===id);
+  if(!p||p.customerId)return null;
+  const now=Date.now();
+  const c={id:db.seqC++,name:"Lead @ "+p.lat.toFixed(4)+", "+p.lng.toFixed(4),phone:"",email:"",
+    street:"",city:"Toronto",lat:p.lat,lng:p.lng,stage:"new",source:"Door-to-door",tags:[],excuse:"",
+    notes:p.note||"",log:[{t:now,m:"Created from a map pin."}],createdAt:now,ownerId:p.userId||1,followup:""};
+  db.customers.push(c);p.customerId=c.id;save();return c;
+}
+
+/* --- rendering --- */
+function renderMap(){
+  const sub="Door-knock pins around your territory";
+  if(navigator.onLine===false){ // undefined (Node, old browsers) counts as online
+    shell("Map",sub,'<div class="panel"><div class="panel-pad empty"><div class="big">📡</div>'+
+      '<div class="et">You are offline</div>'+
+      '<div class="es">Map tiles need a connection. Your pins are safe — reconnect and try again.</div>'+
+      '<div style="margin-top:14px"><button class="btn" id="map-retry">Try again</button></div></div></div>');
+    const r=$("#map-retry");if(r)r.onclick=()=>renderMap();
+    return;
+  }
+  const counts=pinCounts();
+  const pill=(id,label,color,n)=>'<button class="mpill'+(mapFilter===id?" active":"")+'" data-mf="'+esc(id)+'">'+
+    (color?'<span class="d" style="background:'+esc(color)+'"></span>':'')+esc(label)+'<span class="n">'+n+'</span></button>';
+  shell("Map",sub,
+    '<div class="map-bar">'+pill("all","All","",db.pins.length)+
+      PIN_STATUS.map(s=>pill(s.id,s.label,s.color,counts[s.id]||0)).join("")+
+      '<span class="spacer"></span>'+
+      '<button class="fcir" id="map-loc" title="My location" aria-label="My location">🎯</button></div>'+
+    '<div id="map-canvas"></div>');
+  bindMapBar();
+  loadLeaflet().then(initMap).catch(()=>{
+    const c=$("#map-canvas");if(!c)return;
+    c.innerHTML='<div class="empty" style="padding:64px 20px"><div class="big">🗺️</div>'+
+      '<div class="et">Map could not load</div>'+
+      '<div class="es">Leaflet did not download. Check the connection and reopen the Map.</div></div>';
+  });
+}
+function setFilter(id){
+  mapFilter=id;
+  document.querySelectorAll("[data-mf]").forEach(x=>x.classList.toggle("active",x.dataset.mf===id));
+  drawPins();
+}
+function bindMapBar(){
+  document.querySelectorAll("[data-mf]").forEach(b=>b.onclick=()=>{setFilter(b.dataset.mf);fitMap();});
+  const loc=$("#map-loc");if(loc)loc.onclick=locateMe;
+}
+function initMap(L){
+  const el=$("#map-canvas");if(!el)return;
+  if(mapInst){try{mapInst.remove();}catch(e){}mapInst=null;pinLayer=null;} // re-entry: the old node is gone
+  mapInst=L.map(el);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(mapInst);
+  pinLayer=L.layerGroup().addTo(mapInst);
+  drawPins();fitMap();
+  mapInst.on("click",e=>openPinModal(null,e.latlng));
+  mapInst.on("popupopen",bindPinPopup);
+}
+function fitMap(){
+  if(!mapInst||!window.L)return;
+  const pts=visiblePins().map(p=>[p.lat,p.lng]);
+  if(pts.length)mapInst.fitBounds(window.L.latLngBounds(pts).pad(.15),{maxZoom:16});
+  else mapInst.setView([43.77,-79.41],12);
+}
+function drawPins(){
+  if(!pinLayer||!window.L)return;
+  pinLayer.clearLayers();
+  visiblePins().forEach(p=>{
+    const m=window.L.circleMarker([p.lat,p.lng],{radius:10,weight:2,color:"#0b0c10",
+      fillColor:pinMeta(p.status).color,fillOpacity:.95});
+    m.bindPopup(pinPopup(p));
+    pinLayer.addLayer(m);
+  });
+}
+/* Pins changed: repaint the marker layer + the pill counts. Never re-render the whole view —
+   that would tear down the live map instance under the user. */
+function refreshPins(){
+  drawPins();
+  const counts=pinCounts();
+  document.querySelectorAll("[data-mf]").forEach(b=>{
+    const n=b.querySelector(".n");if(!n)return;
+    n.textContent=b.dataset.mf==="all"?db.pins.length:(counts[b.dataset.mf]||0);});
+}
+function pinPopup(p){
+  const s=pinMeta(p.status),c=p.customerId?custById(p.customerId):null;
+  return '<div class="pin-pop">'+
+    '<span class="badge" style="background:'+s.color+'26;color:'+s.color+'">'+
+      '<span class="d" style="background:'+s.color+'"></span>'+esc(s.label)+'</span>'+
+    (p.note?'<div class="pp-note">'+esc(p.note)+'</div>':'')+
+    (c?'<div class="pp-cust">'+esc(c.name)+'</div>':'')+
+    '<div class="pp-when">'+esc(fmtWhen(p.t))+'</div>'+
+    '<div class="pp-btns"><button class="btn sm" data-pinedit="'+p.id+'">Edit</button>'+
+      (c?'':'<button class="btn sm btn-primary" data-pinlead="'+p.id+'">→ Lead</button>')+
+    '</div></div>';
+}
+/* Popup markup is rebuilt by Leaflet on every open — delegate off popupopen, not at draw time. */
+function bindPinPopup(e){
+  const root=e.popup.getElement&&e.popup.getElement();
+  if(!root||!root.querySelectorAll)return;
+  root.querySelectorAll("[data-pinedit]").forEach(b=>b.onclick=()=>{
+    const p=db.pins.find(x=>x.id===+b.dataset.pinedit);if(p)openPinModal(p,null);});
+  root.querySelectorAll("[data-pinlead]").forEach(b=>b.onclick=()=>{
+    const id=+b.dataset.pinlead,c=pinToLead(id);
+    if(!c){toast("That pin already has a customer","err");return;}
+    const p=db.pins.find(x=>x.id===id);
+    if(e.popup.setContent)e.popup.setContent(pinPopup(p));
+    toast("Lead created — "+c.name,"ok");});
+}
+function locateMe(){
+  if(!navigator.geolocation){toast("This browser has no location service","err");return;}
+  toast("Finding you…");
+  navigator.geolocation.getCurrentPosition(
+    pos=>{if(mapInst)mapInst.setView([pos.coords.latitude,pos.coords.longitude],16);
+      else toast("Map is still loading","err");},
+    err=>toast("Location unavailable"+(err&&err.message?" — "+err.message:""),"err"),
+    {enableHighAccuracy:true,timeout:8000,maximumAge:60000});
+}
+/* One modal for both drop (pin=null, latlng from the map click) and edit (pin set). */
+function openPinModal(pin,latlng){
+  const cur=pin||{status:"knock",note:"",customerId:null};
+  const lat=pin?pin.lat:latlng.lat, lng=pin?pin.lng:latlng.lng;
+  const opts=db.customers.slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(c=>'<option value="'+c.id+'"'+(cur.customerId===c.id?" selected":"")+'>'+esc(c.name)+'</option>').join("");
+  $("#pin-title").textContent=pin?"Edit pin":"New pin";
+  $("#pin-hsub").textContent=(+lat).toFixed(5)+", "+(+lng).toFixed(5);
+  $("#pin-body").innerHTML=
+    '<div class="field"><label>Status</label><select id="pin-status">'+
+      PIN_STATUS.map(s=>'<option value="'+esc(s.id)+'"'+(cur.status===s.id?" selected":"")+'>'+esc(s.label)+'</option>').join("")+
+    '</select></div>'+
+    '<div class="field"><label>Note</label>'+
+      '<textarea id="pin-note" placeholder="What happened at the door?">'+esc(cur.note)+'</textarea></div>'+
+    '<div class="field"><label>Link to a customer</label>'+
+      '<select id="pin-cust"><option value="">— none —</option>'+opts+'</select>'+
+      '<div class="hint">Optional. Converting a pin to a lead links it for you.</div></div>';
+  $("#pin-foot").innerHTML=(pin?'<button class="btn del" id="pin-del">Delete</button>':'')+
+    '<span class="spacer"></span><button class="btn" id="pin-cancel">Cancel</button>'+
+    '<button class="btn btn-primary" id="pin-save">Save</button>';
+  $("#pin-cancel").onclick=()=>closeModal("pin-overlay");
+  $("#pin-save").onclick=()=>{
+    const status=$("#pin-status").value, note=($("#pin-note").value||"").trim(), cid=+$("#pin-cust").value||null;
+    if(pin)updatePin(pin.id,{status,note,customerId:cid});
+    else addPin(lat,lng,status,note,cid);
+    closeModal("pin-overlay");
+    if(mapFilter!=="all"&&mapFilter!==status)setFilter("all"); // else the pin just saved is filtered out of sight
+    refreshPins();toast(pin?"Pin updated":"Pin dropped","ok");
+  };
+  const del=$("#pin-del");
+  if(del)del.onclick=()=>{deletePin(pin.id);closeModal("pin-overlay");refreshPins();toast("Pin deleted","ok");};
+  openModal("pin-overlay");
 }
 /* ---------------- Schedule (screen 3) ---------------- */
 let schedDay=today();               // ISO day the timeline/week centers on — in-memory only
@@ -3442,15 +3701,27 @@ function lastPayoutT(userId,key){const l=db.payouts.filter(p=>p.userId===userId&
    stamped closer). Merely riding crewIds, or owning the customer, is no longer enough — that was
    the old bug: an owner saw "3 jobs · $448 sales" for a rep who'd closed only one of them. */
 function payrollRows(key){
+  // SINGLE source of truth = the per-job settlement stamp (settledBy), NOT payout-period sums —
+  // period keys changed under old payouts once (month → week, 2026-08-20) and the two ledgers
+  // disagreed: "to pay $200" with an empty job list. Now: to pay = exactly the unsettled paid
+  // jobs the drill-down shows, always.
   const rows=[];
   activeUsers().forEach(u=>{
-    const jobs=db.jobs.filter(j=>j.status==="done"&&jobInPeriod(j.date,key)&&jobCreditedTo(j,u.id))
+    const all=db.jobs.filter(j=>j.status==="done"&&jobCreditedTo(j,u.id))
       .sort((a,b)=>(a.date||"").localeCompare(b.date||"")); // chronological (owner order 2026-08-20)
-    if(!jobs.length)return;
+    if(!all.length)return;
+    const amt=j=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return cr?cr.amount:0;};
+    const isSettled=j=>!!(j.settledBy&&j.settledBy[u.id]);
+    // Period bounds only the STATS (jobs/sales/commission). What's owed is owed, full stop —
+    // flipping This week / This month must never change the Mark-paid amount (owner order).
+    const jobs=all.filter(j=>jobInPeriod(j.date,key));
+    const unsettled=all.filter(j=>!isSettled(j));
     const sales=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.salesShare:0);},0);
-    const commission=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr&&jobPaid(j)?cr.amount:0);},0);
-    const paid=payoutsSum(u.id,key);
-    rows.push({user:u,jobsCount:jobs.length,sales,commission,paid,owed:Math.max(0,commission-paid),jobs});
+    const commission=jobs.reduce((s,j)=>s+(jobPaid(j)?amt(j):0),0);
+    const settled=jobs.reduce((s,j)=>s+(isSettled(j)?amt(j):0),0);
+    const owed=unsettled.reduce((s,j)=>s+(jobPaid(j)?amt(j):0),0);
+    const pending=unsettled.reduce((s,j)=>s+(!jobPaid(j)?amt(j):0),0); // done, client hasn't paid yet
+    rows.push({user:u,jobsCount:jobs.length,sales,commission,paid:settled,settled,pending,owed,jobs:unsettled});
   });
   return rows;
 }
@@ -3461,8 +3732,8 @@ function markPaid(userId,amount,key){
   // want to see someone from a week ago I've already paid for"). Display-only — the money math
   // stays payoutsSum-based. A job whose money wasn't collected yet isn't stamped: its commission
   // wasn't in this payout, so it stays visible until a payout actually covers it.
-  db.jobs.forEach(j=>{
-    if(j.status!=="done"||!jobInPeriod(j.date,key)||!jobPaid(j)||!jobCreditedTo(j,userId))return;
+  db.jobs.forEach(j=>{ // EVERY unsettled paid job of theirs — the owed number is period-independent
+    if(j.status!=="done"||!jobPaid(j)||!jobCreditedTo(j,userId))return;
     j.settledBy=j.settledBy||{};
     if(!j.settledBy[userId])j.settledBy[userId]=p.t;
   });
@@ -3520,7 +3791,8 @@ function payrollJobLine(j,uid){
   return '<div class="jobline" style="cursor:default;padding-left:52px">'+
     '<div class="sub" style="flex:1;min-width:0">'+esc(fmtDateShort(j.date))+' · '+esc(c?c.name:"—")+' · '+esc(j.service)+
       ' · '+esc(money(j.price))+'</div>'+
-    '<div class="money">'+esc(money2(cr?cr.amount:0))+'</div></div>';
+    '<div class="money">'+esc(money2(cr?cr.amount:0))+'</div>'+
+    (jobPaid(j)?'':'<span class="badge b-scheduled" style="margin-left:8px">unpaid</span>')+'</div>';
 }
 function payrollRow(r,key){
   const u=r.user,lp=lastPayoutT(u.id,key),open=payOpen===u.id;
@@ -3529,24 +3801,26 @@ function payrollRow(r,key){
     '<div class="avatar" style="background:'+(u.color||avatarColor(u.name))+'">'+esc(initials(u.name))+'</div>'+
     '<div style="flex:1;min-width:0"><div class="nm">'+esc(u.name)+'</div>'+
       '<div class="sub">'+r.jobsCount+' job'+(r.jobsCount!==1?"s":"")+' · '+esc(money(r.sales))+' sales</div></div>'+
-    '<div style="text-align:right;margin-right:10px"><div class="money">'+esc(money2(r.commission))+'</div>'+
-      '<div class="sub">'+(r.owed>0?"to pay "+esc(money2(r.owed)):"—")+'</div></div>'+
+    // BIG number = what to hand them right now; the drill-down lists exactly those jobs
+    '<div style="text-align:right;margin-right:10px"><div class="money">'+esc(money2(r.owed))+'</div>'+
+      '<div class="sub">'+(r.settled>0?"settled "+esc(money2(r.settled)):"—")+'</div></div>'+
     (r.owed>0?'<button class="btn sm btn-green" data-markpaid="'+u.id+'">Mark paid</button>'
       :(r.commission>0?'<span class="badge b-won">✓ Paid'+(lp?" "+esc(fmtDateShort(localISO(new Date(lp)))):"")+'</span>':''))+
   '</div>'+
   (open?'<div style="margin-bottom:8px">'+
-    // only what's NOT yet paid out (owner order 2026-08-20) — settled jobs hide, totals below still count them
-    (r.jobs.filter(j=>!(j.settledBy&&j.settledBy[u.id])).map(j=>payrollJobLine(j,u.id)).join("")||
+    // r.jobs IS the unsettled list — it always sums to the to-pay number above, any period
+    (r.jobs.map(j=>payrollJobLine(j,u.id)).join("")||
       '<div class="sub" style="padding:0 0 0 52px;font-style:italic">All settled — nothing waiting.</div>')+
-    '<div class="sub" style="padding:6px 0 0 52px;font-style:italic">Commission '+esc(money2(r.commission))+
-      ' − paid '+esc(money2(r.paid))+' = to pay '+esc(money2(r.owed))+'</div>'+
+    '<div class="sub" style="padding:6px 0 0 52px;font-style:italic">To pay '+esc(money2(r.owed))+
+      (r.settled>0?' · settled '+esc(money2(r.settled)):'')+
+      (r.pending>0?' · waiting on client payment '+esc(money2(r.pending)):'')+'</div>'+
   '</div>':'');
 }
 function payrollCard(){
   const key=payPeriodKey(payPeriod);
   const rows=payrollRows(key);
   const totalOwed=rows.reduce((s,r)=>s+r.owed,0);
-  const totalPaid=rows.reduce((s,r)=>s+payoutsSum(r.user.id,key),0);
+  const totalPaid=rows.reduce((s,r)=>s+r.settled,0); // settled per the job stamps — never a period-key mismatch
   return '<div class="panel"><h2>Payroll<span class="spacer"></span>'+
     '<select id="pp-period" style="'+PILLSEL+'">'+
       PAY_PERIODS.map(([v,l])=>'<option value="'+v+'"'+(payPeriod===v?" selected":"")+'>'+l+'</option>').join("")+
@@ -3554,7 +3828,7 @@ function payrollCard(){
     '<div class="panel-pad">'+
     '<div class="chip-row" style="margin-top:0">'+
       '<div class="schip"><div class="l">To pay</div><div class="n">'+esc(money2(totalOwed))+'</div></div>'+
-      '<div class="schip"><div class="l">Paid this period</div><div class="n">'+esc(money2(totalPaid))+'</div></div>'+
+      '<div class="schip"><div class="l">Settled</div><div class="n">'+esc(money2(totalPaid))+'</div></div>'+
     '</div>'+
     (rows.length?rows.map(r=>payrollRow(r,key)).join(""):'<div class="note" style="margin-top:12px">No closed jobs this period.</div>')+
     '</div></div>';
@@ -4358,7 +4632,7 @@ async function pullConfirmations(){
    same-id collision on them just falls through to newer-db-wins on that one record — see the
    punted-edge-case note in the gate). Order after that doesn't matter. */
 const MERGE_ORDER=["customers","users","plans","jobs","messages","pins","payouts"];
-const TOMB_COLLS=["jobs","customers","plans","messages","payouts","users"]; // users too — a deleted rep must not resurrect from another device's copy
+const TOMB_COLLS=["jobs","customers","plans","messages","payouts","users","pins"]; // users too — a deleted rep must not resurrect from another device's copy
 const SEQ_OF={customers:"seqC",jobs:"seqJ",plans:"seqP",messages:"seqM",payouts:"seqPay",users:"seqU",pins:"seqPin"};
 /* ---- per-record edit stamps ----
    The whole-db updatedAt says which DEVICE saved last, not which RECORD is fresher — resolving a
@@ -4595,7 +4869,7 @@ function bindSyncCard(){
 }
 
 /* ---------------- Modal plumbing ---------------- */
-const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay","blast-overlay"];
+const MODALS=["job-overlay","cust-overlay","invoice-overlay","plan-overlay","sign-overlay","blast-overlay","pin-overlay"];
 const openModals=new Set(); // truth for "is this modal up" — never read the DOM's class for logic
 function openModal(id){openModals.add(id);const o=$("#"+id);if(o)o.classList.add("show");}
 let jobDiscardArm=0;
