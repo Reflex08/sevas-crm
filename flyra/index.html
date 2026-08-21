@@ -1452,7 +1452,7 @@ function repCommRow(row){
   '</div>';
 }
 function repMoneyPanel(me){
-  const key=payPeriodKey("month");
+  const key=payPeriodKey("week"); // owner pays WEEKLY (2026-08-20) — the money panel thinks in pay-weeks
   const r=leaderboardRows("sales",key).find(x=>x.user.id===me.id)||{sales:0,comm:0,count:0};
   const cd=repCommRows(me.id,key);
   // Commission comes from repCommRows, not the leaderboard — a tech's CLEANING pay never enters
@@ -1463,17 +1463,16 @@ function repMoneyPanel(me){
   const commChip='<div class="schip" id="rep-comm-chip" style="cursor:pointer">'+
       '<div class="l">Commission '+(repCommOpen?"▾":"▸")+'</div><div class="n">'+esc(money2(comm))+'</div></div>';
   const drill=repCommOpen?'<div style="margin-top:10px">'+
-      (cd.rows.length?cd.rows.map(repCommRow).join(""):'<div class="sub" style="font-style:italic">No commission jobs this month.</div>')+
+      (cd.rows.length?cd.rows.map(repCommRow).join(""):'<div class="sub" style="font-style:italic">No commission jobs this week.</div>')+
       (cd.unpaidTotal>0?'<div class="sub" style="padding:2px 0 0 4px;font-style:italic">Done, waiting on payment: '+esc(money2(cd.unpaidTotal))+'</div>':'')+
       (cd.bookedTotal>0?'<div class="sub" style="padding:2px 0 0 4px;font-style:italic">Coming up (booked, not yet earned): '+esc(money2(cd.bookedTotal))+'</div>':'')+
     '</div>':'';
-  return '<div class="panel"><h2>My money<span class="pill">'+
-      esc(new Date().toLocaleDateString(undefined,{month:"long"}))+'</span></h2><div class="panel-pad">'+
+  return '<div class="panel"><h2>My money<span class="pill">This week</span></h2><div class="panel-pad">'+
     '<div class="chip-row" style="margin-top:0">'+(me.role==="tech"?"":chip("My sales",money2(r.sales)))+
       commChip+chip("Paid out",money2(paid))+chip("Owed",money2(owed))+'</div>'+
     '<div class="hint">'+(me.role==="tech"
-      ?cd.rows.filter(x=>x.done).length+' job'+(cd.rows.filter(x=>x.done).length!==1?"s":"")+' cleaned this month.'
-      :r.count+' job'+(r.count!==1?"s":"")+' credited to you this month.')+'</div>'+
+      ?cd.rows.filter(x=>x.done).length+' job'+(cd.rows.filter(x=>x.done).length!==1?"s":"")+' cleaned this week.'
+      :r.count+' job'+(r.count!==1?"s":"")+' credited to you this week.')+'</div>'+
     drill+
   '</div></div>';
 }
@@ -3344,10 +3343,10 @@ function paintBlast(){
 }
 /* ---------------- Team / Payroll / Equipment / Expenses (screen 9) ---------------- */
 let teamEditUser=null;            // user id in inline edit, "new" while adding, else null
-let payPeriod=uiPref().payPeriod||"month"; // "month" | "lastmonth" | "year"
+let payPeriod=uiPref().payPeriod||"week"; // "week" | "lastweek" | "month" | "lastmonth" | "year" — owner pays weekly (2026-08-20)
 let expMonth=today().slice(0,7);  // "YYYY-MM" the expense card is showing — in-memory only
 let payOpen=null;                 // userId of the expanded payroll row, or null
-const PAY_PERIODS=[["month","This month"],["lastmonth","Last month"],["year","This year"]];
+const PAY_PERIODS=[["week","This week"],["lastweek","Last week"],["month","This month"],["lastmonth","Last month"],["year","This year"]];
 
 /* --- user data ops --- */
 function createUser(data){
@@ -3388,9 +3387,22 @@ function payPeriodKey(p){
   if(p==="year")return t.slice(0,4);
   if(p==="lastmonth"){const d=new Date(t+"T12:00:00");d.setMonth(d.getMonth()-1);
     return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
+  if(p==="week"||p==="lastweek"){ // weekly pay (owner 2026-08-20): key = "W"+Monday's ISO date
+    const d=new Date(t+"T12:00:00");
+    d.setDate(d.getDate()-((d.getDay()+6)%7)); // back to Monday
+    if(p==="lastweek")d.setDate(d.getDate()-7);
+    return "W"+localISO(d);
+  }
   return t.slice(0,7);
 }
-function jobInPeriod(dateStr,key){return key.length===4?(dateStr||"").slice(0,4)===key:(dateStr||"").slice(0,7)===key;}
+function jobInPeriod(dateStr,key){
+  if(key[0]==="W"){ // "W2026-08-17" = the Monday; the week runs Mon..Sun
+    const start=key.slice(1);
+    const e=new Date(start+"T12:00:00");e.setDate(e.getDate()+6);
+    return (dateStr||"")>=start&&(dateStr||"")<=localISO(e);
+  }
+  return key.length===4?(dateStr||"").slice(0,4)===key:(dateStr||"").slice(0,7)===key;
+}
 function payoutsSum(userId,key){return db.payouts.filter(p=>p.userId===userId&&p.period===key).reduce((s,p)=>s+(+p.amount||0),0);}
 function lastPayoutT(userId,key){const l=db.payouts.filter(p=>p.userId===userId&&p.period===key);return l.length?Math.max(...l.map(p=>p.t)):0;}
 /* Per active user: done jobs they're actually CREDITED on (jobCreditedTo — splits, or the single
