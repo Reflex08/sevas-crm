@@ -825,6 +825,39 @@ function newDb(){
   return normalize({v:1,settings,users,customers,jobs,invoices,plans,pins,messages,equipment,expenses,payouts:[]});
 }
 
+/* Daily closer bonus (owner order 2026-08-20): reps earn their base rate per close, but 5 or
+   more closes BOOKED in one day bumps every one of that day's closes to 50%. Recomputed over
+   the last 7 days on load and after every booking/delete — a same-day delete that drops a rep
+   under 5 takes the bonus back; older stamps are history and never rewritten. Lives above
+   normalize() because normalize calls it during the initial load. */
+const DAILY_BONUS_AT=5,DAILY_BONUS_PCT=50;
+function closedDay(j){return (+j.createdAt||0)?localISO(new Date(+j.createdAt)):"";}
+function repClosesOn(data,uid,dayISO){
+  return data.jobs.filter(j=>j.closerId===uid&&!(Array.isArray(j.splits)&&j.splits.length)&&
+    j.status!=="cancelled"&&closedDay(j)===dayISO);
+}
+function applyDailyBonus(data){
+  const cut=Date.now()-7*86400000;
+  const groups={}; // "uid|day" → jobs
+  data.jobs.forEach(j=>{
+    if(!j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled")return;
+    if((+j.createdAt||0)<cut)return;
+    const u=(data.users||[]).find(x=>x.id===j.closerId);
+    if(!u||u.role!=="sales")return;
+    (groups[j.closerId+"|"+closedDay(j)]=groups[j.closerId+"|"+closedDay(j)]||[]).push(j);
+  });
+  let changed=false;
+  Object.entries(groups).forEach(([key,jobs])=>{
+    const uid=+key.split("|")[0];
+    const base=+(((data.users||[]).find(x=>x.id===uid)||{}).commissionPct)||0;
+    if(jobs.length>=DAILY_BONUS_AT)
+      jobs.forEach(j=>{if(+j.commissionPct!==DAILY_BONUS_PCT){j.commissionPct=DAILY_BONUS_PCT;changed=true;}});
+    else // under the bar: take back only OUR bonus stamp — a hand-set special rate is never touched
+      jobs.forEach(j=>{if(+j.commissionPct===DAILY_BONUS_PCT&&base!==DAILY_BONUS_PCT){j.commissionPct=base;changed=true;}});
+  });
+  return changed;
+}
+
 function normalize(r){
   r=r||{};
   r.v=1;
@@ -909,7 +942,9 @@ function normalize(r){
      if(j.closerId){const u=r.users.find(x=>x.id===j.closerId);
        if(u&&u.role==="tech"){j.closerId=null;j.commissionPct=0;}}
      if(j.status!=="cancelled")stampCleaner(j,r.users);
-   });}
+   });
+   applyDailyBonus(r); // 5+ same-day closes = 50% on all of them — recomputed on every load
+  }
   r.invoices.forEach(i=>{
     if(!Array.isArray(i.lines))i.lines=[];
     if(!Array.isArray(i.jobIds))i.jobIds=[];
@@ -1538,10 +1573,12 @@ function createJob(data){
     const c=custById(j.customerId),u=c&&c.ownerId?userById(c.ownerId):null;
     if(u&&(+u.commissionPct||0)>0){j.closerId=u.id;j.commissionPct=+u.commissionPct;}
   }
-  db.jobs.push(j);save();return j;
+  db.jobs.push(j);
+  applyDailyBonus(db); // the 5th close of the day bumps the whole day to 50%
+  save();return j;
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
-function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);save();}
+function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);applyDailyBonus(db);save();}
 /* Done flow — three-way (owner's bug report: Cancel used to still mark it done, which read as
    "collected"): OK = done + paid · Cancel then OK = done, NOT paid yet · Cancel twice = abort,
    the job stays booked and nothing changes. */
@@ -2004,7 +2041,8 @@ function openJob(id,preset){
   // Address line under the name: tap → Waze opens and starts navigating there (best route).
   const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
   $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
-    (c&&c.phone?' <a class="btn sm" style="margin-left:8px;text-decoration:none" href="tel:'+esc(smsNum(c.phone))+'">📞 Call</a>':"")+
+    (c&&c.phone?' <a class="btn sm" style="margin-left:8px;text-decoration:none" href="tel:'+esc(smsNum(c.phone))+'">📞 Call</a>'+
+      ' <a class="btn sm" style="margin-left:8px;text-decoration:none" href="sms:'+esc(smsNum(c.phone))+'">💬 Text</a>':"")+
     (c?' <button class="btn sm" id="jf-editcust" style="margin-left:8px">✎ Edit client</button>':"")+
     (showConfirm?(j.termsAcceptedAt?
       ' <button class="btn sm" id="jf-confirm" style="margin-left:8px">✓ Confirmed</button>':
@@ -2450,14 +2488,13 @@ function custForm(c){
         userOptList(c?c.ownerId:null).map(u=>'<option value="'+u.id+'"'+(c&&c.ownerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("")+
       '</select></div>'+
     '</div>'+
-    '<div class="field"><label>Excuse (why not booked yet)</label>'+
-      '<input id="ce-excuse" list="ce-excuse-opts" value="'+val("excuse")+'" placeholder="Has to talk to the wife…">'+
-      '<datalist id="ce-excuse-opts">'+LEAD_EXCUSES.map(x=>'<option value="'+esc(x)+'">').join("")+'</datalist></div>'+
-    '<div class="grid2">'+
-      '<div class="field"><label>Tags</label><input id="ce-tags" value="'+esc((c&&c.tags||[]).join(", "))+'" placeholder="Repeat, Big house">'+
-        '<div class="hint">Comma separated.</div></div>'+
-      '<div class="field"><label>Follow-up</label><input id="ce-followup" type="date" value="'+val("followup")+'"></div>'+
-    '</div>'+
+    // Excuse is LEAD machinery — a won client's editor shows just the basics + notes
+    // (owner order 2026-08-20: tags and follow-up fields removed outright, notes stay)
+    (!c||c.stage!=="won"
+      ?'<div class="field"><label>Excuse (why not booked yet)</label>'+
+        '<input id="ce-excuse" list="ce-excuse-opts" value="'+val("excuse")+'" placeholder="Has to talk to the wife…">'+
+        '<datalist id="ce-excuse-opts">'+LEAD_EXCUSES.map(x=>'<option value="'+esc(x)+'">').join("")+'</datalist></div>'
+      :'')+
     '<div class="field"><label>Notes</label><textarea id="ce-notes">'+val("notes")+'</textarea></div>';
 }
 function openCustEdit(id){
@@ -2479,10 +2516,10 @@ function openCustEdit(id){
       city:($("#ce-city").value||"").trim(),
       stage:c?c.stage:"new", // no Stage dropdown — new leads start at "new", ✓/Mark lost move them
       source:($("#ce-source").value||"").trim(),
-      excuse:($("#ce-excuse").value||"").trim(),
+      excuse:(c&&c.stage==="won")?(c.excuse||""):((($("#ce-excuse")||{}).value||"").trim()),
       ownerId:+$("#ce-rep").value||(activeUsers()[0]||db.users[0]||{}).id||1,
-      tags:($("#ce-tags").value||"").split(",").map(t=>t.trim()).filter(Boolean),
-      followup:$("#ce-followup").value||"",
+      tags:c?(c.tags||[]):[],        // tags + follow-up fields left the form — stored values ride along
+      followup:c?(c.followup||""):"",
       notes:($("#ce-notes").value||"").trim()};
     const saved=c?updateCust(c.id,data):createCust(data);
     render();toast("Saved","ok");
@@ -3477,11 +3514,38 @@ function payrollCard(){
     (rows.length?rows.map(r=>payrollRow(r,key)).join(""):'<div class="note" style="margin-top:12px">No closed jobs this period.</div>')+
     '</div></div>';
 }
+/* Who closed who TODAY (owner order 2026-08-20): one row per client a rep booked today, grouped
+   by rep, with the live count and the rate the day earned (5+ closes = 50% on all of them). */
+function closesTodayCard(){
+  const t=today();
+  const reps=activeUsers().filter(u=>u.role==="sales");
+  const blocks=reps.map(u=>{
+    const jobs=repClosesOn(db,u.id,t).sort((a,b)=>(+a.createdAt||0)-(+b.createdAt||0));
+    if(!jobs.length)return"";
+    const bonus=jobs.length>=DAILY_BONUS_AT;
+    const sales=jobs.reduce((s,j)=>s+(+j.price||0),0);
+    return '<div class="jobline" style="cursor:default">'+
+      '<div class="avatar" style="background:'+(u.color||avatarColor(u.name))+'">'+esc(initials(u.name))+'</div>'+
+      '<div style="flex:1;min-width:0"><div class="nm">'+esc(u.name)+'</div>'+
+        '<div class="sub">'+jobs.length+' close'+(jobs.length!==1?"s":"")+' today · '+esc(money(sales))+'</div></div>'+
+      '<span class="badge '+(bonus?"b-won":"b-scheduled")+'">'+(bonus?"🔥 50%":(+u.commissionPct||0)+"%")+'</span>'+
+    '</div>'+
+    jobs.map(j=>{const c=custById(j.customerId);
+      return '<div class="jobline" style="cursor:default;padding-left:52px">'+
+        '<div class="sub" style="flex:1;min-width:0">'+esc(c?c.name:"—")+' · '+esc(j.service)+
+          (j.date!==t?' · booked for '+esc(fmtDateShort(j.date)):'')+'</div>'+
+        '<div class="money">'+esc(money(j.price))+'</div></div>';}).join("");
+  }).join("");
+  return '<div class="panel"><h2>Today’s closes</h2><div class="panel-pad">'+
+    (blocks||'<div class="note">No closes yet today.</div>')+
+    '<div class="hint" style="margin-top:8px">Hit '+DAILY_BONUS_AT+'+ closes in a day and every one of that day’s closes pays '+DAILY_BONUS_PCT+'%.</div>'+
+  '</div></div>';
+}
 function renderTeam(){
   $("#content").innerHTML=
     '<div class="page-head"><div><div class="ph-title">Team &amp; Payroll</div>'+
     '<div class="ph-sub">Crew and commission</div></div></div>'+
-    teamCard()+payrollCard();
+    teamCard()+closesTodayCard()+payrollCard();
   bindTeamEvents();
 }
 function bindTeamEvents(){
