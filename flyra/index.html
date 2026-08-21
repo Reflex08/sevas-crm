@@ -398,6 +398,8 @@
   .mpill.active .n{color:var(--ink)}
   #map-canvas{height:calc(100vh - 150px);min-height:420px;border-radius:16px;border:1px solid var(--line);
     overflow:hidden;background:#0d0e12;position:relative;z-index:0}
+  /* satellite imagery must never be dark-inverted — that filter is a streets-tiles trick only */
+  #map-canvas.sat .leaflet-tile-pane{filter:none}
   /* OSM ships only light tiles — invert + hue-rotate is the classic way to darken them without a paid style. */
   .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.92) saturate(.72)}
   .leaflet-container{background:#0d0e12;font:inherit}
@@ -959,6 +961,7 @@ function normalize(r){
   for(const k of ["jobs","customers","plans","messages","payouts","users","pins"])
     if(!Array.isArray(r.deleted[k]))r.deleted[k]=[];
   r.pins.forEach(p=>{p.lat=+p.lat||0;p.lng=+p.lng||0;
+    if(typeof p.address!=="string")p.address="";
     if(!(+p.createdAt))p.createdAt=+p.t||0;}); // pins predate createdAt — tombstones need it
   // settle-stamp backfill (one-time era, 2026-08-20): payouts logged BEFORE per-job settlement
   // existed left their jobs unstamped — the owner's practice was always "Mark paid clears what's
@@ -1643,7 +1646,32 @@ function renderRepHome(){
    The only screen that touches the network, and only while it is open:
    unpkg for Leaflet itself, tile.openstreetmap.org for tiles, the geolocation API on demand. */
 const pinMeta=id=>PIN_STATUS.find(s=>s.id===id)||PIN_STATUS[0];
-let mapInst=null,pinLayer=null,mapFilter="all",leafletPromise=null;
+let mapInst=null,pinLayer=null,mapFilter="all",leafletPromise=null,baseLayer=null;
+let mapBase=uiPref().mapBase||"sat"; // sat | streets — satellite shows the REAL houses (owner order 2026-08-20)
+const BASE_TILES={
+  sat:{url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    opt:{maxZoom:19,attribution:"&copy; Esri — World Imagery"}},
+  streets:{url:"https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    opt:{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}}
+};
+function applyBase(){
+  if(!mapInst||!window.L)return;
+  if(baseLayer){try{mapInst.removeLayer(baseLayer);}catch(e){}baseLayer=null;}
+  const b=BASE_TILES[mapBase]||BASE_TILES.sat;
+  baseLayer=window.L.tileLayer(b.url,b.opt).addTo(mapInst);
+  const el=$("#map-canvas");if(el&&el.classList)el.classList.toggle("sat",mapBase==="sat"); // dark-invert is for streets only
+}
+/* Address lookup (Nominatim, free, no key) — fired only by a user's map tap, never at startup. */
+function lookupAddress(lat,lng){
+  return fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat="+
+      encodeURIComponent(lat)+"&lon="+encodeURIComponent(lng))
+    .then(r=>r.json())
+    .then(d=>{
+      const a=d.address||{};
+      const line=[a.house_number,a.road].filter(Boolean).join(" ");
+      return line||((d.display_name||"").split(",").slice(0,2).join(",").trim());
+    }).catch(()=>"");
+}
 
 /* Cached promise = one download per session. A failure clears the cache so re-opening retries. */
 function loadLeaflet(){
@@ -1670,10 +1698,11 @@ function visiblePins(){return mapFilter==="all"?db.pins.slice():db.pins.filter(p
 function pinCounts(){const c={};db.pins.forEach(p=>c[p.status]=(c[p.status]||0)+1);return c;}
 
 /* --- pin data ops (the modal calls these, so the gate can drive the same code path) --- */
-function addPin(lat,lng,status,note,customerId){
+function addPin(lat,lng,status,note,customerId,address){
   const p={id:db.seqPin++,lat:+(+lat).toFixed(5),lng:+(+lng).toFixed(5),
     status:PIN_STATUS.some(s=>s.id===status)?status:"knock",
-    note:note||"",customerId:customerId||null,t:Date.now(),createdAt:Date.now(),userId:(whoUser()||{}).id||1};
+    note:note||"",address:address||"",customerId:customerId||null,
+    t:Date.now(),createdAt:Date.now(),userId:(whoUser()||{}).id||1};
   db.pins.push(p);save();return p;
 }
 function updatePin(id,patch){const p=db.pins.find(x=>x.id===id);if(!p)return null;
@@ -1684,8 +1713,8 @@ function pinToLead(id){
   const p=db.pins.find(x=>x.id===id);
   if(!p||p.customerId)return null;
   const now=Date.now();
-  const c={id:db.seqC++,name:"Lead @ "+p.lat.toFixed(4)+", "+p.lng.toFixed(4),phone:"",email:"",
-    street:"",city:"Toronto",lat:p.lat,lng:p.lng,stage:"new",source:"Door-to-door",tags:[],excuse:"",
+  const c={id:db.seqC++,name:"Lead @ "+(p.address||p.lat.toFixed(4)+", "+p.lng.toFixed(4)),phone:"",email:"",
+    street:p.address||"",city:"Toronto",lat:p.lat,lng:p.lng,stage:"new",source:"Door-to-door",tags:[],excuse:"",
     notes:p.note||"",log:[{t:now,m:"Created from a map pin."}],createdAt:now,ownerId:p.userId||1,followup:""};
   db.customers.push(c);p.customerId=c.id;save();return c;
 }
@@ -1708,8 +1737,9 @@ function renderMap(){
     '<div class="map-bar">'+pill("all","All","",db.pins.length)+
       PIN_STATUS.map(s=>pill(s.id,s.label,s.color,counts[s.id]||0)).join("")+
       '<span class="spacer"></span>'+
+      '<button class="fcir" id="map-base" title="Satellite / streets" aria-label="Satellite or streets">'+(mapBase==="sat"?"🗺️":"🛰️")+'</button>'+
       '<button class="fcir" id="map-loc" title="My location" aria-label="My location">🎯</button></div>'+
-    '<div id="map-canvas"></div>');
+    '<div id="map-canvas"'+(mapBase==="sat"?' class="sat"':'')+'></div>');
   bindMapBar();
   loadLeaflet().then(initMap).catch(()=>{
     const c=$("#map-canvas");if(!c)return;
@@ -1726,13 +1756,15 @@ function setFilter(id){
 function bindMapBar(){
   document.querySelectorAll("[data-mf]").forEach(b=>b.onclick=()=>{setFilter(b.dataset.mf);fitMap();});
   const loc=$("#map-loc");if(loc)loc.onclick=locateMe;
+  const base=$("#map-base");if(base)base.onclick=()=>{
+    mapBase=mapBase==="sat"?"streets":"sat";uiSet({mapBase});applyBase();
+    base.textContent=mapBase==="sat"?"🗺️":"🛰️";};
 }
 function initMap(L){
   const el=$("#map-canvas");if(!el)return;
   if(mapInst){try{mapInst.remove();}catch(e){}mapInst=null;pinLayer=null;} // re-entry: the old node is gone
   mapInst=L.map(el);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(mapInst);
+  applyBase(); // satellite by default — the actual houses, not a diagram
   pinLayer=L.layerGroup().addTo(mapInst);
   drawPins();fitMap();
   mapInst.on("click",e=>openPinModal(null,e.latlng));
@@ -1768,6 +1800,7 @@ function pinPopup(p){
   return '<div class="pin-pop">'+
     '<span class="badge" style="background:'+s.color+'26;color:'+s.color+'">'+
       '<span class="d" style="background:'+s.color+'"></span>'+esc(s.label)+'</span>'+
+    (p.address?'<div class="pp-note" style="color:var(--muted)">📍 '+esc(p.address)+'</div>':'')+
     (p.note?'<div class="pp-note">'+esc(p.note)+'</div>':'')+
     (c?'<div class="pp-cust">'+esc(c.name)+'</div>':'')+
     '<div class="pp-when">'+esc(fmtWhen(p.t))+'</div>'+
@@ -1804,7 +1837,15 @@ function openPinModal(pin,latlng){
   const opts=db.customers.slice().sort((a,b)=>a.name.localeCompare(b.name))
     .map(c=>'<option value="'+c.id+'"'+(cur.customerId===c.id?" selected":"")+'>'+esc(c.name)+'</option>').join("");
   $("#pin-title").textContent=pin?"Edit pin":"New pin";
-  $("#pin-hsub").textContent=(+lat).toFixed(5)+", "+(+lng).toFixed(5);
+  // The house's ADDRESS, not coordinates (owner order 2026-08-20) — looked up async on first open
+  let pinAddr=pin?(pin.address||""):"";
+  $("#pin-hsub").textContent=pinAddr||"Looking up address…";
+  if(!pinAddr)lookupAddress(lat,lng).then(a=>{
+    pinAddr=a||"";
+    const h=$("#pin-hsub");if(h)h.textContent=pinAddr||((+lat).toFixed(5)+", "+(+lng).toFixed(5));
+    if(pin&&pinAddr){const p2=db.pins.find(x=>x.id===pin.id);
+      if(p2&&!p2.address){p2.address=pinAddr;save();}} // old pins heal their address on open
+  });
   $("#pin-body").innerHTML=
     '<div class="field"><label>Status</label><select id="pin-status">'+
       PIN_STATUS.map(s=>'<option value="'+esc(s.id)+'"'+(cur.status===s.id?" selected":"")+'>'+esc(s.label)+'</option>').join("")+
@@ -1820,8 +1861,8 @@ function openPinModal(pin,latlng){
   $("#pin-cancel").onclick=()=>closeModal("pin-overlay");
   $("#pin-save").onclick=()=>{
     const status=$("#pin-status").value, note=($("#pin-note").value||"").trim(), cid=+$("#pin-cust").value||null;
-    if(pin)updatePin(pin.id,{status,note,customerId:cid});
-    else addPin(lat,lng,status,note,cid);
+    if(pin)updatePin(pin.id,{status,note,customerId:cid,address:pinAddr||pin.address||""});
+    else addPin(lat,lng,status,note,cid,pinAddr);
     closeModal("pin-overlay");
     if(mapFilter!=="all"&&mapFilter!==status)setFilter("all"); // else the pin just saved is filtered out of sight
     refreshPins();toast(pin?"Pin updated":"Pin dropped","ok");
