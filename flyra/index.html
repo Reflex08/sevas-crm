@@ -715,6 +715,7 @@ const DEFAULT_SETTINGS=()=>({
   services:JSON.parse(JSON.stringify(DEFAULT_SERVICES)),
   templates:JSON.parse(JSON.stringify(DEFAULT_TEMPLATES)),
   goal:50000,
+  monthGoal:15000, // monthly revenue target — edited right on the dashboard card (owner 2026-08-20)
   automation:{followupEveryDays:3,followupMaxTries:5,reviewAskAfterDone:true,reviewLink:"",lastRun:""},
   stripe:{pk:""},
   smsNumber:"",  // Flyra's "custom number" — a label here, nothing dials it locally
@@ -873,6 +874,7 @@ function normalize(r){
   if(typeof s.smsNumber!=="string")s.smsNumber="";
   s.ownerPin=/^\d{4,8}$/.test(String(s.ownerPin||""))?String(s.ownerPin):"";
   if(!s.tier)s.tier=d.tier;
+  if(!isFinite(+s.monthGoal))s.monthGoal=d.monthGoal;else s.monthGoal=Math.max(0,+s.monthGoal);
   s.terms=Object.assign({},d.terms,s.terms||{});
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
@@ -1391,10 +1393,41 @@ function activityPanel(){
       :'<div class="es" style="font-style:italic;color:var(--faint)">No activity yet.</div>')+
     '</div></div>';
 }
+/* Monthly goal card (owner order 2026-08-20): "reach $15,000 by the end of the month" — the
+   goal is set right on the card, progress = money actually COLLECTED this month, with the
+   day-of-month pace and what's still needed per day. */
+function monthGoalCard(){
+  const t=today(),mk=t.slice(0,7);
+  const goal=+db.settings.monthGoal||0;
+  const rev=db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===mk)
+    .reduce((s,j)=>s+(+j.collected||0),0);
+  const day=+t.slice(8,10);
+  const dim=new Date(+t.slice(0,4),+t.slice(5,7),0).getDate();
+  const pct=goal>0?Math.min(100,rev/goal*100):0;
+  const left=Math.max(0,goal-rev);
+  const needPerDay=left>0?left/Math.max(1,dim-day):0;
+  const onPace=day>0?rev/day*dim:0;
+  const monthName=new Date(t+"T12:00:00").toLocaleDateString(undefined,{month:"long"});
+  return '<div class="panel"><h2>Monthly goal<span class="pill">'+esc(monthName)+'</span>'+
+      '<span class="spacer"></span><span style="font-size:12.5px;font-weight:600;color:var(--muted)">$</span>'+
+      '<input id="mg-goal" type="number" min="0" step="500" value="'+goal+'" style="'+PILL_SEL+';width:96px"></h2>'+
+    '<div class="panel-pad">'+
+      '<div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;margin-bottom:6px">'+
+        '<span>'+esc(money(rev))+' of '+esc(money(goal))+'</span>'+
+        '<span style="color:var(--green)">'+Math.round(pct)+'%</span></div>'+
+      '<div style="height:10px;border-radius:6px;background:var(--gray-soft);overflow:hidden">'+
+        '<div style="width:'+pct.toFixed(1)+'%;height:100%;border-radius:6px;background:var(--green)"></div></div>'+
+      '<div class="hint" style="margin-top:8px">Day '+day+' of '+dim+
+        (goal>0?(left>0?' · '+esc(money2(needPerDay))+'/day to hit it · on pace for '+esc(money(onPace))
+                       :' · 🎉 goal hit — '+esc(money(rev-goal))+' over')
+               :' · set a goal amount above')+'</div>'+
+    '</div></div>';
+}
 function renderDashboard(){
   $("#content").innerHTML=
     heroGreetHTML()+
-    revenuePanel()+leaderboardPanel()+todayPanel()+activityPanel();
+    revenuePanel()+monthGoalCard()+leaderboardPanel()+todayPanel()+activityPanel();
+  const mg=$("#mg-goal");if(mg)mg.onchange=()=>{db.settings.monthGoal=Math.max(0,+mg.value||0);save();renderDashboard();toast("Goal saved","ok");};
   document.querySelectorAll("[data-rtab]").forEach(b=>b.onclick=()=>{dashRevTab=b.dataset.rtab;renderDashboard();});
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;renderDashboard();});
   document.querySelectorAll("[data-cm]").forEach(b=>b.onclick=()=>{chartMode=b.dataset.cm;uiSet({chartMode});renderDashboard();});
@@ -1469,7 +1502,7 @@ function repMoneyPanel(me){
     '</div>':'';
   return '<div class="panel"><h2>My money<span class="pill">This week</span></h2><div class="panel-pad">'+
     '<div class="chip-row" style="margin-top:0">'+(me.role==="tech"?"":chip("My sales",money2(r.sales)))+
-      commChip+chip("Paid out",money2(paid))+chip("Owed",money2(owed))+'</div>'+
+      commChip+chip("Paid out",money2(paid))+chip("To pay",money2(owed))+'</div>'+
     '<div class="hint">'+(me.role==="tech"
       ?cd.rows.filter(x=>x.done).length+' job'+(cd.rows.filter(x=>x.done).length!==1?"s":"")+' cleaned this week.'
       :r.count+' job'+(r.count!==1?"s":"")+' credited to you this week.')+'</div>'+
@@ -3497,7 +3530,7 @@ function payrollRow(r,key){
     '<div style="flex:1;min-width:0"><div class="nm">'+esc(u.name)+'</div>'+
       '<div class="sub">'+r.jobsCount+' job'+(r.jobsCount!==1?"s":"")+' · '+esc(money(r.sales))+' sales</div></div>'+
     '<div style="text-align:right;margin-right:10px"><div class="money">'+esc(money2(r.commission))+'</div>'+
-      '<div class="sub">'+(r.owed>0?"owed "+esc(money2(r.owed)):"—")+'</div></div>'+
+      '<div class="sub">'+(r.owed>0?"to pay "+esc(money2(r.owed)):"—")+'</div></div>'+
     (r.owed>0?'<button class="btn sm btn-green" data-markpaid="'+u.id+'">Mark paid</button>'
       :(r.commission>0?'<span class="badge b-won">✓ Paid'+(lp?" "+esc(fmtDateShort(localISO(new Date(lp)))):"")+'</span>':''))+
   '</div>'+
@@ -3506,7 +3539,7 @@ function payrollRow(r,key){
     (r.jobs.filter(j=>!(j.settledBy&&j.settledBy[u.id])).map(j=>payrollJobLine(j,u.id)).join("")||
       '<div class="sub" style="padding:0 0 0 52px;font-style:italic">All settled — nothing waiting.</div>')+
     '<div class="sub" style="padding:6px 0 0 52px;font-style:italic">Commission '+esc(money2(r.commission))+
-      ' − paid '+esc(money2(r.paid))+' = owed '+esc(money2(r.owed))+'</div>'+
+      ' − paid '+esc(money2(r.paid))+' = to pay '+esc(money2(r.owed))+'</div>'+
   '</div>':'');
 }
 function payrollCard(){
@@ -3520,7 +3553,7 @@ function payrollCard(){
     '</select></h2>'+
     '<div class="panel-pad">'+
     '<div class="chip-row" style="margin-top:0">'+
-      '<div class="schip"><div class="l">Total owed</div><div class="n">'+esc(money2(totalOwed))+'</div></div>'+
+      '<div class="schip"><div class="l">To pay</div><div class="n">'+esc(money2(totalOwed))+'</div></div>'+
       '<div class="schip"><div class="l">Paid this period</div><div class="n">'+esc(money2(totalPaid))+'</div></div>'+
     '</div>'+
     (rows.length?rows.map(r=>payrollRow(r,key)).join(""):'<div class="note" style="margin-top:12px">No closed jobs this period.</div>')+
