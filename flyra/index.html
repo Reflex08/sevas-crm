@@ -114,8 +114,13 @@
   body.rep .nav a[data-view="plans"],body.rep .nav a[data-view="messages"],
   body.rep .nav a[data-view="team"],body.rep .nav a[data-view="reports"],
   body.rep .nav a[data-view="settings"]{display:none}
-  /* technician: no leads, no map — his day and his money only. Square is the owner's alone (owner order 2026-08-19) */
-  body.tech .nav a[data-view="leads"],body.tech .nav a[data-view="map"]{display:none}
+  /* the Map is a SALES-REP tool (owner order 2026-08-20): hidden by default, shown for reps,
+     hidden again for techs — rule order matters, a tech's body carries .rep AND .tech */
+  .nav a[data-view="map"]{display:none}
+  body.rep .nav a[data-view="map"]{display:flex}
+  body.tech .nav a[data-view="map"]{display:none}
+  /* technician: no leads — his day and his money only. Square is the owner's alone (owner order 2026-08-19) */
+  body.tech .nav a[data-view="leads"]{display:none}
   body.rep .nav-square{display:none}
   .nav-square{display:flex;align-items:center;gap:12px;padding:9px 12px;margin:0 12px 8px;border-radius:9px;
     color:var(--muted);font-weight:600;font-size:14px}
@@ -1266,7 +1271,9 @@ function isRep(){const u=whoUser();return !!u&&(u.role==="sales"||u.role==="tech
 function visibleViews(){ // a technician works his day — no leads, no sales screens
   const u=whoUser();
   if(u&&u.role==="tech")return["dashboard","schedule"];
-  return isRep()?REP_VIEWS.slice():Object.keys(VIEWS);}
+  if(isRep())return REP_VIEWS.slice();
+  return Object.keys(VIEWS).filter(v=>v!=="map"); // map = field-crew tool; owner asked it off his own menu
+}
 function needsPin(u){return !!(db.settings.ownerPin)&&!!u&&(u.role==="owner"||u.role==="manager");}
 /* Called after the person changes: a screen they can no longer reach falls back to Home. */
 function applyWhoDefaults(){
@@ -1646,7 +1653,7 @@ function renderRepHome(){
    The only screen that touches the network, and only while it is open:
    unpkg for Leaflet itself, tile.openstreetmap.org for tiles, the geolocation API on demand. */
 const pinMeta=id=>PIN_STATUS.find(s=>s.id===id)||PIN_STATUS[0];
-let mapInst=null,pinLayer=null,mapFilter="all",leafletPromise=null,baseLayer=null;
+let mapInst=null,pinLayer=null,mapFilter="all",leafletPromise=null,baseLayer=null,labelLayer=null;
 let mapBase=uiPref().mapBase||"sat"; // sat | streets — satellite shows the REAL houses (owner order 2026-08-20)
 const BASE_TILES={
   sat:{url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -1657,8 +1664,13 @@ const BASE_TILES={
 function applyBase(){
   if(!mapInst||!window.L)return;
   if(baseLayer){try{mapInst.removeLayer(baseLayer);}catch(e){}baseLayer=null;}
+  if(labelLayer){try{mapInst.removeLayer(labelLayer);}catch(e){}labelLayer=null;}
   const b=BASE_TILES[mapBase]||BASE_TILES.sat;
   baseLayer=window.L.tileLayer(b.url,b.opt).addTo(mapInst);
+  // hybrid look: street/place names float over the imagery — bare satellite is unreadable
+  if(mapBase==="sat")labelLayer=window.L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    {maxZoom:19}).addTo(mapInst);
   const el=$("#map-canvas");if(el&&el.classList)el.classList.toggle("sat",mapBase==="sat"); // dark-invert is for streets only
 }
 /* Address lookup (Nominatim, free, no key) — fired only by a user's map tap, never at startup. */
@@ -1721,6 +1733,9 @@ function pinToLead(id){
 
 /* --- rendering --- */
 function renderMap(){
+  // A LIVE map is never torn down under the user: sync ticks / autosaves re-enter here every
+  // minute — repaint the pins and pill counts, keep their pan/zoom exactly where it was.
+  if(mapInst&&$("#map-canvas")){refreshPins();return;}
   const sub="Door-knock pins around your territory";
   if(navigator.onLine===false){ // undefined (Node, old browsers) counts as online
     shell("Map",sub,'<div class="panel"><div class="panel-pad empty"><div class="big">📡</div>'+
