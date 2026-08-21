@@ -769,6 +769,8 @@ const DEFAULT_SETTINGS=()=>({
   templates:JSON.parse(JSON.stringify(DEFAULT_TEMPLATES)),
   goal:50000,
   monthGoal:15000, // monthly revenue target — edited right on the dashboard card (owner 2026-08-20)
+  monthGoalStart:"", // optional count-from date (owner 2026-08-21: "everything after August 16 counts");
+                     // only honored while its month is the current month, otherwise the 1st
   automation:{followupEveryDays:3,followupMaxTries:5,reviewAskAfterDone:true,reviewLink:"",lastRun:""},
   stripe:{pk:""},
   smsNumber:"",  // Flyra's "custom number" — a label here, nothing dials it locally
@@ -928,6 +930,10 @@ function normalize(r){
   s.ownerPin=/^\d{4,8}$/.test(String(s.ownerPin||""))?String(s.ownerPin):"";
   if(!s.tier)s.tier=d.tier;
   if(!isFinite(+s.monthGoal))s.monthGoal=d.monthGoal;else s.monthGoal=Math.max(0,+s.monthGoal);
+  // one-time backfill (2026-08-21): dbs from before the field existed started counting Aug 16 —
+  // the owner's real start. Harmless for anyone else: it's ignored once the month rolls over.
+  if(typeof s.monthGoalStart!=="string")s.monthGoalStart="2026-08-16";
+  if(s.monthGoalStart&&!/^\d{4}-\d{2}-\d{2}$/.test(s.monthGoalStart))s.monthGoalStart="";
   s.terms=Object.assign({},d.terms,s.terms||{});
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
@@ -1040,6 +1046,43 @@ function normalize(r){
     if(typeof m.body!=="string")m.body="";
     if(!m.dueAt)m.dueAt=today();});
   r.payouts.forEach(p=>{p.amount=+p.amount||0;if(!p.period)p.period="";if(!p.t)p.t=Date.now();});
+  // Demo seed must never live alongside real clients (owner 2026-08-21: "stop making up fake
+  // customers whenever we do an update") — a fresh device seeds Maya & co, then a merge into the
+  // company cloud drags them in. Fingerprint = exact seed name+phone (555 numbers are fictional
+  // by definition, a real client can't collide). Gated on db size so the out-of-box demo and the
+  // test seed keep working untouched.
+  {const DEMO_FP={"Maya Whitfield":"(416) 555-0142","Daniel Okafor":"(416) 555-0173",
+    "Priya Raman":"(647) 555-0188","Grace Lindqvist":"(416) 555-0119","Marcus Bell":"(647) 555-0126",
+    "Theo Vasquez":"(416) 555-0155","Nadia Sorensen":"(647) 555-0164","Harold Pinsky":"(416) 555-0197"};
+  if(r.customers.length>20){
+    const demo=new Set(r.customers.filter(c=>DEMO_FP[c.name]===c.phone).map(c=>c.id));
+    if(demo.size){
+      r.jobs.filter(j=>demo.has(j.customerId)).forEach(j=>r.deleted.jobs.push({id:j.id,t:Date.now()}));
+      demo.forEach(id=>r.deleted.customers.push({id,t:Date.now()}));
+      r.customers=r.customers.filter(c=>!demo.has(c.id));
+      for(const k of ["jobs","invoices","plans","pins","messages"])r[k]=r[k].filter(x=>!demo.has(x.customerId));
+    }
+  }}
+  // Merge-resurrection guard: a draft the owner already ✕'d must stay dead even when a stale
+  // device re-queues its own fresh copy (new id, new t — record stamps can't catch that).
+  // Not tombstoned: messages carry no createdAt, so an id tomb would kill unrelated reused ids;
+  // this filter simply re-drops the copy on every load/merge until all devices converge.
+  {const doneAfter=(cid,ts)=>r.jobs.some(j=>j.customerId===cid&&j.status==="done"&&(+j.completedAt||0)>ts);
+  const seenQ=new Set();
+  r.messages=r.messages.filter(m=>{
+    if(m.status!=="queued")return true;
+    const handled=k=>Math.max(0,...r.messages.filter(x=>x.customerId===m.customerId&&x.kind===k&&x.status!=="queued"&&(k!=="reminder"||x.jobDate===m.jobDate)).map(x=>+x.t||0));
+    if(m.kind==="thanks"){
+      const key="t"+m.customerId;
+      if(seenQ.has(key))return false;                       // two devices each queued one — keep one
+      const h=handled("thanks");
+      if(h&&!doneAfter(m.customerId,h))return false;        // already thanked/dismissed for this visit
+      seenQ.add(key);return true;
+    }
+    if(m.kind==="followup"&&r.messages.some(x=>x.customerId===m.customerId&&x.kind==="followup"&&x.status==="dismissed"))return false;
+    if(m.kind==="reminder"&&handled("reminder"))return false; // that day's reminder was already sent or ✕'d
+    return true;
+  });}
   // sequences: always max(id)+1 so normalize() is idempotent
   const seqOf=list=>Math.max(0,...list.map(x=>+x.id||0))+1;
   r.seqU=seqOf(r.users);r.seqC=seqOf(r.customers);r.seqJ=seqOf(r.jobs);r.seqI=seqOf(r.invoices);
@@ -1474,17 +1517,26 @@ function activityPanel(){
 function monthGoalCard(){
   const t=today(),mk=t.slice(0,7);
   const goal=+db.settings.monthGoal||0;
-  const rev=db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===mk)
+  // counting starts at monthGoalStart when it falls in the current month (owner started
+  // tracking Aug 16 mid-month), otherwise the 1st — the pace math shrinks to match
+  const gs=db.settings.monthGoalStart||"";
+  const start=(gs.slice(0,7)===mk&&gs>=mk+"-01")?gs:mk+"-01";
+  const rev=db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===mk&&j.date>=start)
     .reduce((s,j)=>s+(+j.collected||0),0);
-  const day=+t.slice(8,10);
   const dim=new Date(+t.slice(0,4),+t.slice(5,7),0).getDate();
+  const startDay=+start.slice(8,10);
+  const day=Math.max(1,+t.slice(8,10)-startDay+1);   // day N of the tracked stretch
+  const span=dim-startDay+1;                          // total days in the tracked stretch
   const pct=goal>0?Math.min(100,rev/goal*100):0;
   const left=Math.max(0,goal-rev);
-  const needPerDay=left>0?left/Math.max(1,dim-day):0;
-  const onPace=day>0?rev/day*dim:0;
+  const needPerDay=left>0?left/Math.max(1,span-day):0;
+  const onPace=day>0?rev/day*span:0;
   const monthName=new Date(t+"T12:00:00").toLocaleDateString(undefined,{month:"long"});
+  const sinceTag=startDay>1?' · since '+esc(fmtDateShort(start)):'';
   return '<div class="panel"><h2>Monthly goal<span class="pill">'+esc(monthName)+'</span>'+
-      '<span class="spacer"></span><span style="font-size:12.5px;font-weight:600;color:var(--muted)">$</span>'+
+      '<span class="spacer"></span>'+
+      '<input id="mg-start" type="date" value="'+esc(start)+'" title="Count revenue from this date" style="'+PILL_SEL+';width:130px">'+
+      '<span style="font-size:12.5px;font-weight:600;color:var(--muted)">$</span>'+
       '<input id="mg-goal" type="number" min="0" step="500" value="'+goal+'" style="'+PILL_SEL+';width:96px"></h2>'+
     '<div class="panel-pad">'+
       '<div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;margin-bottom:6px">'+
@@ -1492,7 +1544,7 @@ function monthGoalCard(){
         '<span style="color:var(--green)">'+Math.round(pct)+'%</span></div>'+
       '<div style="height:10px;border-radius:6px;background:var(--gray-soft);overflow:hidden">'+
         '<div style="width:'+pct.toFixed(1)+'%;height:100%;border-radius:6px;background:var(--green)"></div></div>'+
-      '<div class="hint" style="margin-top:8px">Day '+day+' of '+dim+
+      '<div class="hint" style="margin-top:8px">Day '+day+' of '+span+sinceTag+
         (goal>0?(left>0?' · '+esc(money2(needPerDay))+'/day to hit it · on pace for '+esc(money(onPace))
                        :' · 🎉 goal hit — '+esc(money(rev-goal))+' over')
                :' · set a goal amount above')+'</div>'+
@@ -1503,6 +1555,7 @@ function renderDashboard(){
     heroGreetHTML()+
     revenuePanel()+monthGoalCard()+leaderboardPanel()+todayPanel()+activityPanel();
   const mg=$("#mg-goal");if(mg)mg.onchange=()=>{db.settings.monthGoal=Math.max(0,+mg.value||0);save();renderDashboard();toast("Goal saved","ok");};
+  const ms=$("#mg-start");if(ms)ms.onchange=()=>{db.settings.monthGoalStart=/^\d{4}-\d{2}-\d{2}$/.test(ms.value)?ms.value:"";save();renderDashboard();toast("Counting from "+(ms.value||"the 1st"),"ok");};
   document.querySelectorAll("[data-rtab]").forEach(b=>b.onclick=()=>{dashRevTab=b.dataset.rtab;renderDashboard();});
   document.querySelectorAll("[data-rp]").forEach(b=>b.onclick=()=>{dashRevPeriod=b.dataset.rp;renderDashboard();});
   document.querySelectorAll("[data-cm]").forEach(b=>b.onclick=()=>{chartMode=b.dataset.cm;uiSet({chartMode});renderDashboard();});
@@ -3413,11 +3466,13 @@ function thanksTemplate(){ // token form of the post-job thank-you — ONE sourc
 function queueThanks(customerId){
   const c=custById(customerId);
   if(!c||!cleanNum(c.phone))return null;
-  // one thank-you per visit, not per lifetime: blocked only while one is already waiting, or a
-  // recent one (30 days) was sent/dismissed — a repeat clean months later gets thanked again
-  const recent=Date.now()-30*86400000;
-  if(db.messages.some(m=>m.customerId===customerId&&m.kind==="thanks"&&m.status!=="cancelled"&&
-    (m.status==="queued"||(+m.t||0)>recent)))return null;
+  // one thank-you per completed VISIT, forever (owner 2026-08-21: "stop queuing things I've
+  // already pressed cancel on"): any existing thanks — queued, sent, dismissed, cancelled —
+  // blocks until a job completes AFTER it. A ✕ kills that visit's ask for good; only a
+  // genuinely new clean starts a fresh one.
+  if(db.messages.some(m=>m.customerId===customerId&&m.kind==="thanks"&&m.status==="queued"))return null;
+  const last=Math.max(0,...db.messages.filter(m=>m.customerId===customerId&&m.kind==="thanks").map(m=>+m.t||0));
+  if(last&&!custJobs(customerId).some(j=>j.status==="done"&&(+j.completedAt||0)>last))return null;
   // retire superseded queued drafts — the thank-you itself carries the review + referral asks
   db.messages.forEach(m=>{
     if(m.customerId===customerId&&(m.kind==="review"||m.kind==="referral")&&m.status==="queued")m.status="cancelled";
