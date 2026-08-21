@@ -771,6 +771,7 @@ const DEFAULT_SETTINGS=()=>({
   monthGoal:15000, // monthly revenue target — edited right on the dashboard card (owner 2026-08-20)
   monthGoalStart:"", // optional count-from date (owner 2026-08-21: "everything after August 16 counts");
                      // only honored while its month is the current month, otherwise the 1st
+  monthGoalBonus:500, // owner 2026-08-21: "everyone is getting a $500 bonus if they hit that 15k goal on time"
   automation:{followupEveryDays:3,followupMaxTries:5,reviewAskAfterDone:true,reviewLink:"",lastRun:""},
   stripe:{pk:""},
   smsNumber:"",  // Flyra's "custom number" — a label here, nothing dials it locally
@@ -934,6 +935,7 @@ function normalize(r){
   // the owner's real start. Harmless for anyone else: it's ignored once the month rolls over.
   if(typeof s.monthGoalStart!=="string")s.monthGoalStart="2026-08-16";
   if(s.monthGoalStart&&!/^\d{4}-\d{2}-\d{2}$/.test(s.monthGoalStart))s.monthGoalStart="";
+  if(!isFinite(+s.monthGoalBonus))s.monthGoalBonus=d.monthGoalBonus;else s.monthGoalBonus=Math.max(0,+s.monthGoalBonus);
   s.terms=Object.assign({},d.terms,s.terms||{});
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
@@ -1514,7 +1516,7 @@ function activityPanel(){
 /* Monthly goal card (owner order 2026-08-20): "reach $15,000 by the end of the month" — the
    goal is set right on the card, progress = money actually COLLECTED this month, with the
    day-of-month pace and what's still needed per day. */
-function monthGoalCard(){
+function monthGoalCard(readOnly){
   const t=today(),mk=t.slice(0,7);
   const goal=+db.settings.monthGoal||0;
   // counting starts at monthGoalStart when it falls in the current month (owner started
@@ -1533,11 +1535,15 @@ function monthGoalCard(){
   const onPace=day>0?rev/day*span:0;
   const monthName=new Date(t+"T12:00:00").toLocaleDateString(undefined,{month:"long"});
   const sinceTag=startDay>1?' · since '+esc(fmtDateShort(start)):'';
+  const bonus=+db.settings.monthGoalBonus||0;
+  const bonusLine=(bonus>0&&goal>0)?'<div class="hint" style="margin-top:4px">🎁 '+
+    (rev>=goal?'Goal hit on time — '+esc(money(bonus))+' bonus each, unlocked!'
+             :esc(money(bonus))+' bonus for everyone if the team hits '+esc(money(goal))+' by month end')+'</div>':'';
   return '<div class="panel"><h2>Monthly goal<span class="pill">'+esc(monthName)+'</span>'+
-      '<span class="spacer"></span>'+
+      (readOnly?'':'<span class="spacer"></span>'+
       '<input id="mg-start" type="date" value="'+esc(start)+'" title="Count revenue from this date" style="'+PILL_SEL+';width:130px">'+
       '<span style="font-size:12.5px;font-weight:600;color:var(--muted)">$</span>'+
-      '<input id="mg-goal" type="number" min="0" step="500" value="'+goal+'" style="'+PILL_SEL+';width:96px"></h2>'+
+      '<input id="mg-goal" type="number" min="0" step="500" value="'+goal+'" style="'+PILL_SEL+';width:96px">')+'</h2>'+
     '<div class="panel-pad">'+
       '<div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;margin-bottom:6px">'+
         '<span>'+esc(money(rev))+' of '+esc(money(goal))+'</span>'+
@@ -1547,7 +1553,7 @@ function monthGoalCard(){
       '<div class="hint" style="margin-top:8px">Day '+day+' of '+span+sinceTag+
         (goal>0?(left>0?' · '+esc(money2(needPerDay))+'/day to hit it · on pace for '+esc(money(onPace))
                        :' · 🎉 goal hit — '+esc(money(rev-goal))+' over')
-               :' · set a goal amount above')+'</div>'+
+               :' · set a goal amount above')+'</div>'+bonusLine+
     '</div></div>';
 }
 function renderDashboard(){
@@ -1691,6 +1697,9 @@ function renderRepHome(){
   $("#content").innerHTML=
     heroGreetHTML()+
     // A technician has no sales race and no leads — his own money and his day, nobody else's numbers.
+    // The month goal + team bonus shows for EVERYONE (owner 2026-08-21: "$500 each if they hit 15k"),
+    // read-only — the crew should see what they're chasing, not edit it.
+    monthGoalCard(true)+
     (me.role==="tech"
       ?repMoneyPanel(me)+repDayPanel(me)
       :repLeaderPanel(me)+repMoneyPanel(me)+repDayPanel(me)+repLeadsPanel(me));
