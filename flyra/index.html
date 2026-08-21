@@ -253,6 +253,8 @@
   .tl-hour{width:52px;flex-shrink:0;color:var(--faint);font-size:11px;font-weight:700;padding-top:8px;text-align:right}
   .tl-slot{flex:1;display:flex;flex-wrap:wrap;gap:8px;padding:8px 0}
   .tl-card{background:linear-gradient(135deg,#1c3f66,#2a6ba8);border-radius:14px;padding:10px 12px;min-width:150px;max-width:100%;cursor:pointer;flex:1 1 150px}
+  /* gutter visits read amber at a glance (owner 2026-08-21); .done stays below so green still wins once finished */
+  .tl-card.gutter{background:linear-gradient(135deg,#78350f,#b45309)}
   .tl-card.done{background:linear-gradient(135deg,#14532d,#166534)}
   .tl-card .n{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-card .s{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:1px}
@@ -271,6 +273,7 @@
   .week-col.today .week-col-head{color:var(--brand)}
   .week-col-body{display:flex;flex-direction:column;gap:6px}
   .week-card{background:linear-gradient(135deg,#1c3f66,#2a6ba8);border-radius:10px;padding:7px 9px;cursor:pointer}
+  .week-card.gutter{background:linear-gradient(135deg,#78350f,#b45309)}
   .week-card.done{background:linear-gradient(135deg,#14532d,#166534)}
   .week-card .wt{font-size:10px;color:rgba(255,255,255,.7);font-weight:700}
   .week-card .wn{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2054,11 +2057,12 @@ function groupSlotJobs(jobs){
   return groups;
 }
 function confCk(){return '<span class="conf-ck" title="Confirmed by client">✓</span>';}
+const isGutterJob=j=>/gutter/i.test(j.service||"");
 function tlCard(j){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=j.status==="done";
   const range=j.time?tlTimeRange(j.time):"";
-  return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
+  return '<div class="tl-card '+(isGutterJob(j)?"gutter ":"")+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
     '<div class="n">'+esc(c.name)+(!done&&j.termsAcceptedAt?" "+confCk():"")+'</div>'+
     '<div class="s">'+esc(j.service)+'</div>'+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
@@ -2075,7 +2079,7 @@ function tlGroupCard(g){
   const confirmed=g.jobs.every(x=>x.termsAcceptedAt); // confirmLink confirms the whole visit at once
   const range=j.time?tlTimeRange(j.time):"";
   const rows=g.jobs.map(x=>'<div class="tl-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
-  return '<div class="tl-card '+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
+  return '<div class="tl-card '+(g.jobs.some(isGutterJob)?"gutter ":"")+(done?"done":"")+'" data-jobcard="'+j.id+'">'+
     '<div class="n">'+esc(c.name)+(!done&&confirmed?" "+confCk():"")+'</div>'+
     rows+
     (range?'<div class="tr">'+esc(range)+'</div>':'')+
@@ -2099,7 +2103,7 @@ function renderDayTimeline(){
 function weekCard(j){
   const c=custById(j.customerId)||{name:"(deleted customer)"};
   const done=j.status==="done";
-  return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
+  return '<div class="week-card'+(isGutterJob(j)?" gutter":"")+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
     '<div class="wn">'+esc(c.name)+(!done&&j.termsAcceptedAt?" "+confCk():"")+'</div>'+
     '<div class="wp">'+money2(j.price)+'</div>'+
@@ -2111,7 +2115,7 @@ function weekGroupCard(g){
   const done=g.jobs.every(x=>x.status==="done");
   const confirmed=g.jobs.every(x=>x.termsAcceptedAt);
   const rows=g.jobs.map(x=>'<div class="wk-item" data-jobcard="'+x.id+'"><span>'+esc(x.service)+'</span><span>'+money2(x.price)+'</span></div>').join("");
-  return '<div class="week-card'+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
+  return '<div class="week-card'+(g.jobs.some(isGutterJob)?" gutter":"")+(done?" done":"")+'" data-jobcard="'+j.id+'">'+
     (j.time?'<div class="wt">'+esc(fmtTime(j.time))+'</div>':'')+
     '<div class="wn">'+esc(c.name)+(!done&&confirmed?" "+confCk():"")+'</div>'+
     rows+
