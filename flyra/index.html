@@ -2901,6 +2901,11 @@ function custForm(c){
         userOptList(c?c.ownerId:null).map(u=>'<option value="'+u.id+'"'+(c&&c.ownerId===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("")+
       '</select></div>'+
     '</div>'+
+    // Client ⇄ Lead switch (owner 2026-08-21) — only on an existing record; new ones start as leads
+    (c?'<div class="field"><label>Type</label><select id="ce-type">'+
+        '<option value="client"'+(c.stage==="won"?" selected":"")+'>Client (booked)</option>'+
+        '<option value="lead"'+(c.stage!=="won"?" selected":"")+'>Lead (not booked yet)</option>'+
+      '</select></div>':'')+
     // Excuse is LEAD machinery — a won client's editor shows just the basics + notes
     // (owner order 2026-08-20: tags and follow-up fields removed outright, notes stay)
     (!c||c.stage!=="won"
@@ -2927,7 +2932,8 @@ function openCustEdit(id){
       email:c?(c.email||""):"", // email field removed from the form — existing values ride along untouched
       street:($("#ce-street").value||"").trim(),
       city:($("#ce-city").value||"").trim(),
-      stage:c?c.stage:"new", // no Stage dropdown — new leads start at "new", ✓/Mark lost move them
+      // Type select: Client = won; Lead keeps its current pipeline stage, a demoted client lands at "new"
+      stage:!c?"new":((($("#ce-type")||{}).value||(c.stage==="won"?"client":"lead"))==="client"?"won":(c.stage==="won"?"new":c.stage)),
       source:($("#ce-source").value||"").trim(),
       excuse:(c&&c.stage==="won")?(c.excuse||""):((($("#ce-excuse")||{}).value||"").trim()),
       ownerId:+$("#ce-rep").value||(activeUsers()[0]||db.users[0]||{}).id||1,
