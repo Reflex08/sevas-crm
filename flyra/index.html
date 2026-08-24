@@ -750,7 +750,7 @@ const DEFAULT_SERVICES=[
   {name:"Car Detailing",price:199},
 ];
 const DEFAULT_TEMPLATES=[
-  {id:"t1",name:"Booking reminder",body:"Hi {firstname} — your {service} is booked for {date}. Reply here if anything changes."},
+  {id:"t1",name:"Booking reminder",body:"Hi {firstname} — your {service} is booked for {date}. Before we arrive, please make sure all windows are closed, blinds and shades are up, and that we'll have access to an outdoor hose. Reply here if anything changes."},
   {id:"t2",name:"Quote follow-up",body:"Hi {firstname}, still happy to hold your {service} price. Want me to get you on the calendar?"},
   {id:"t3",name:"Review request",body:"Thanks {firstname}! If the {service} on {date} looked good, a short review would really help us."},
 ];
@@ -931,6 +931,11 @@ function normalize(r){
   s.automation=Object.assign({},d.automation,s.automation||{});
   s.stripe=Object.assign({},d.stripe,s.stripe||{});
   if(typeof s.smsNumber!=="string")s.smsNumber="";
+  // reminder default grew prep instructions (owner 2026-08-21: "windows closed, access to the hose") —
+  // migrate only the untouched old default, owner-edited wording stays
+  {const t1=s.templates.find(x=>x.id==="t1");
+   if(t1&&t1.body==="Hi {firstname} — your {service} is booked for {date}. Reply here if anything changes.")
+     t1.body=DEFAULT_TEMPLATES.find(x=>x.id==="t1").body;}
   s.ownerPin=/^\d{4,8}$/.test(String(s.ownerPin||""))?String(s.ownerPin):"";
   if(!s.tier)s.tier=d.tier;
   if(!isFinite(+s.monthGoal))s.monthGoal=d.monthGoal;else s.monthGoal=Math.max(0,+s.monthGoal);
@@ -1559,10 +1564,29 @@ function monthGoalCard(readOnly){
                :' · set a goal amount above')+'</div>'+bonusLine+
     '</div></div>';
 }
+/* Ticket size (owner 2026-08-21): average / highest / lowest per VISIT — same-slot jobs
+   (windows + gutters on one booking) are ONE ticket. Same tracked stretch as the goal card. */
+function ticketPanel(){
+  const t=today(),mk=t.slice(0,7);
+  const gs=db.settings.monthGoalStart||"";
+  const start=(gs.slice(0,7)===mk&&gs>=mk+"-01")?gs:mk+"-01";
+  const byVisit={};
+  db.jobs.filter(j=>j.status==="done"&&(j.date||"").slice(0,7)===mk&&j.date>=start&&(+j.collected||0)>0)
+    .forEach(j=>{const k=j.customerId+"|"+j.date+"|"+(j.time||"");byVisit[k]=(byVisit[k]||0)+(+j.collected||0);});
+  const vals=Object.values(byVisit);
+  if(!vals.length)return "";
+  const avg=vals.reduce((s,v)=>s+v,0)/vals.length,hi=Math.max(...vals),lo=Math.min(...vals);
+  const tile=(l,v)=>'<div style="flex:1;text-align:center"><div style="font-size:19px;font-weight:800">'+esc(v)+'</div>'+
+    '<div class="hint">'+esc(l)+'</div></div>';
+  return '<div class="panel"><h2>Ticket size<span class="pill">'+vals.length+' visits · since '+esc(fmtDateShort(start))+'</span></h2>'+
+    '<div class="panel-pad" style="display:flex;gap:10px">'+
+      tile("Average",money2(avg))+tile("Highest",money2(hi))+tile("Lowest",money2(lo))+
+    '</div></div>';
+}
 function renderDashboard(){
   $("#content").innerHTML=
     heroGreetHTML()+
-    revenuePanel()+monthGoalCard()+leaderboardPanel()+todayPanel()+activityPanel();
+    revenuePanel()+monthGoalCard()+ticketPanel()+leaderboardPanel()+todayPanel()+activityPanel();
   const mg=$("#mg-goal");if(mg)mg.onchange=()=>{db.settings.monthGoal=Math.max(0,+mg.value||0);save();renderDashboard();toast("Goal saved","ok");};
   const ms=$("#mg-start");if(ms)ms.onchange=()=>{db.settings.monthGoalStart=/^\d{4}-\d{2}-\d{2}$/.test(ms.value)?ms.value:"";save();renderDashboard();toast("Counting from "+(ms.value||"the 1st"),"ok");};
   document.querySelectorAll("[data-rtab]").forEach(b=>b.onclick=()=>{dashRevTab=b.dataset.rtab;renderDashboard();});
