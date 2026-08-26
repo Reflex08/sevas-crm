@@ -890,7 +890,7 @@ function newDb(){
    the last 7 days on load and after every booking/delete — a same-day delete that drops a rep
    under 5 takes the bonus back; older stamps are history and never rewritten. Lives above
    normalize() because normalize calls it during the initial load. */
-const DAILY_BONUS_AT=5,DAILY_BONUS_PCT=50;
+const DAILY_BONUS_AT=4,DAILY_BONUS_PCT=50; // owner 2026-08-21: "now it's 4 sales to 50%, not 5"
 function closedDay(j){return (+j.createdAt||0)?localISO(new Date(+j.createdAt)):"";}
 function repClosesOn(data,uid,dayISO){
   return data.jobs.filter(j=>j.closerId===uid&&!(Array.isArray(j.splits)&&j.splits.length)&&
@@ -1033,7 +1033,7 @@ function normalize(r){
        if(u&&u.role==="tech"){j.closerId=null;j.commissionPct=0;}}
      if(j.status!=="cancelled")stampCleaner(j,r.users);
    });
-   applyDailyBonus(r); // 5+ same-day closes = 50% on all of them — recomputed on every load
+   applyDailyBonus(r); // DAILY_BONUS_AT+ same-day closes = 50% on all of them — recomputed on every load
   }
   r.invoices.forEach(i=>{
     if(!Array.isArray(i.lines))i.lines=[];
@@ -3988,7 +3988,7 @@ function payrollCard(){
     '</div></div>';
 }
 /* Who closed who TODAY (owner order 2026-08-20): one row per client a rep booked today, grouped
-   by rep, with the live count and the rate the day earned (5+ closes = 50% on all of them). */
+   by rep, with the live count and the rate the day earned (DAILY_BONUS_AT+ closes = 50% on all of them). */
 function closesTodayCard(){
   const t=today();
   const reps=activeUsers().filter(u=>u.role==="sales");
