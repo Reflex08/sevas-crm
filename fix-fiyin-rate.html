@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Patch — Fiyin 30%</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px;max-width:640px;margin:0 auto}
+pre{background:#15161c;padding:14px;border-radius:10px;white-space:pre-wrap}</style></head><body>
+<h2>Fiyin's cleaning rate → 30% (from now on)</h2>
+<pre id="log"></pre>
+<script>
+"use strict";
+const DBKEY="flyra.v1",FILE="flyra-db.json";
+const log=m=>{const el=document.getElementById("log");el.textContent=el.textContent+m+String.fromCharCode(10);};
+(async function(){
+try{
+  const tok=localStorage.getItem("flyra.synckey"),gid=localStorage.getItem("flyra.syncgist");
+  if(!tok||!gid){log("No sync token in this profile — open this page in the profile that runs the CRM.");return;}
+  const H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+  const g=await (await fetch("https://api.github.com/gists/"+gid,{headers:H})).json();
+  const f=g.files[FILE];
+  const db=JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+  const techs=(db.users||[]).filter(u=>u.role==="tech"&&/fiyin/i.test(String(u.name||""))&&u.active!==false);
+  if(techs.length!==1){log("Expected exactly one active technician named Fiyin, found "+techs.length+" — aborting.");return;}
+  const u=techs[0];
+  if(+u.commissionPct===30){log("Already 30% — nothing to do.");return;}
+  const was=+u.commissionPct||0;
+  const now=Date.now();
+  u.commissionPct=30;u.up=now;
+  db.updatedAt=now;
+  const localRaw=localStorage.getItem(DBKEY);
+  if(localRaw)localStorage.setItem(DBKEY+".backup-fiyin-rate-"+now,localRaw);
+  localStorage.setItem(DBKEY,JSON.stringify(db));
+  const res=await fetch("https://api.github.com/gists/"+gid,{method:"PATCH",headers:H,
+    body:JSON.stringify({files:{[FILE]:{content:JSON.stringify(db)}}})});
+  log(res.ok?"Pushed to cloud OK":"Cloud push FAILED ("+res.status+")");
+  log(u.name+": "+was+"% → 30%. Applies to every job marked Done from now on; jobs already completed keep the rate they were done at.");
+  log("DONE — reopen the CRM.");
+}catch(e){log("ERROR: "+e.message);}
+})();
+</script></body></html>
