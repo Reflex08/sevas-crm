@@ -1058,6 +1058,11 @@ function normalize(r){
     if(typeof m.body!=="string")m.body="";
     if(!m.dueAt)m.dueAt=today();});
   r.payouts.forEach(p=>{p.amount=+p.amount||0;if(!p.period)p.period="";if(!p.t)p.t=Date.now();});
+  // settledAmt backfill (2026-08-26): jobs settled before the field existed count as paid at
+  // their current amount — only rate rises AFTER this build surface as top-ups
+  r.jobs.forEach(j=>{if(!j.settledBy||typeof j.settledBy!=="object")return;
+    j.settledAmt=(j.settledAmt&&typeof j.settledAmt==="object")?j.settledAmt:{};
+    Object.keys(j.settledBy).forEach(uid=>{if(j.settledAmt[uid]==null){const cr=jobCredits(j).find(c=>String(c.userId)===String(uid));j.settledAmt[uid]=cr?cr.amount:0;}});});
   // Demo seed must never live alongside real clients (owner 2026-08-21: "stop making up fake
   // customers whenever we do an update") — a fresh device seeds Maya & co, then a merge into the
   // company cloud drags them in. Fingerprint = exact seed name+phone (555 numbers are fictional
@@ -3874,9 +3879,12 @@ function payrollRows(key){
     const sales=jobs.reduce((s,j)=>{const cr=jobCredits(j).find(c=>c.userId===u.id);return s+(cr?cr.salesShare:0);},0);
     const commission=jobs.reduce((s,j)=>s+(jobPaid(j)?amt(j):0),0);
     const settled=jobs.reduce((s,j)=>s+(isSettled(j)?amt(j):0),0);
-    const owed=unsettled.reduce((s,j)=>s+(jobPaid(j)?amt(j):0),0);
+    // settled jobs whose rate went UP since payday (a bonus day unlocking late) owe the difference
+    const topups=all.filter(j=>isSettled(j)&&jobPaid(j)&&j.settledAmt&&j.settledAmt[u.id]!=null)
+      .map(j=>({job:j,was:+j.settledAmt[u.id],diff:amt(j)-(+j.settledAmt[u.id])})).filter(x=>x.diff>0.005);
+    const owed=unsettled.reduce((s,j)=>s+(jobPaid(j)?amt(j):0),0)+topups.reduce((s,x)=>s+x.diff,0);
     const pending=unsettled.reduce((s,j)=>s+(!jobPaid(j)?amt(j):0),0); // done, client hasn't paid yet
-    rows.push({user:u,jobsCount:jobs.length,sales,commission,paid:settled,settled,pending,owed,jobs:unsettled});
+    rows.push({user:u,jobsCount:jobs.length,sales,commission,paid:settled,settled,pending,owed,jobs:unsettled,topups});
   });
   return rows;
 }
@@ -3891,6 +3899,10 @@ function markPaid(userId,amount,key){
     if(j.status!=="done"||!jobPaid(j)||!jobCreditedTo(j,userId))return;
     j.settledBy=j.settledBy||{};
     if(!j.settledBy[userId])j.settledBy[userId]=p.t;
+    // remember WHAT was paid: the collected-4 bonus can flip a day to 50% days after payday
+    // (owner 2026-08-26), and the difference has to surface as a top-up, not vanish
+    const cr=jobCredits(j).find(c=>c.userId===userId);
+    j.settledAmt=j.settledAmt||{};j.settledAmt[userId]=cr?cr.amount:0;
   });
   save();return p;
 }
@@ -3949,6 +3961,13 @@ function payrollJobLine(j,uid){
     '<div class="money">'+esc(money2(cr?cr.amount:0))+'</div>'+
     (jobPaid(j)?'':'<span class="badge b-scheduled" style="margin-left:8px">unpaid</span>')+'</div>';
 }
+function payrollTopupLine(x,uid){ // a job already paid out, now worth more (bonus day unlocked after payday)
+  const j=x.job,c=custById(j.customerId),cr=jobCredits(j).find(k=>k.userId===uid);
+  return '<div class="jobline" style="cursor:default;padding-left:52px">'+
+    '<div class="sub" style="flex:1;min-width:0">'+esc(fmtDateShort(j.date))+' · '+esc(c?c.name:"—")+' · '+esc(j.service)+
+      ' · <b>bonus top-up</b> — paid '+esc(money2(x.was))+', now '+esc(money2(cr?cr.amount:0))+'</div>'+
+    '<div class="money">+'+esc(money2(x.diff))+'</div></div>';
+}
 function payrollRow(r,key){
   const u=r.user,lp=lastPayoutT(u.id,key),open=payOpen===u.id;
   return '<div class="jobline" data-payrow="'+u.id+'" style="cursor:pointer">'+
@@ -3964,7 +3983,7 @@ function payrollRow(r,key){
   '</div>'+
   (open?'<div style="margin-bottom:8px">'+
     // r.jobs IS the unsettled list — it always sums to the to-pay number above, any period
-    (r.jobs.map(j=>payrollJobLine(j,u.id)).join("")||
+    (r.jobs.map(j=>payrollJobLine(j,u.id)).join("")+(r.topups||[]).map(x=>payrollTopupLine(x,u.id)).join("")||
       '<div class="sub" style="padding:0 0 0 52px;font-style:italic">All settled — nothing waiting.</div>')+
     '<div class="sub" style="padding:6px 0 0 52px;font-style:italic">To pay '+esc(money2(r.owed))+
       (r.settled>0?' · settled '+esc(money2(r.settled)):'')+
