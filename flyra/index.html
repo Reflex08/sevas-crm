@@ -910,7 +910,9 @@ function applyDailyBonus(data){
   Object.entries(groups).forEach(([key,jobs])=>{
     const uid=+key.split("|")[0];
     const base=+(((data.users||[]).find(x=>x.id===uid)||{}).commissionPct)||0;
-    if(jobs.length>=DAILY_BONUS_AT)
+    // owner 2026-08-26: the bar is COLLECTED sales — "three today at 50% aren't really 50% unless
+    // I collect that fourth sale first". Booked-but-unpaid closes don't count toward the 4.
+    if(jobs.filter(jobPaid).length>=DAILY_BONUS_AT)
       jobs.forEach(j=>{if(+j.commissionPct!==DAILY_BONUS_PCT){j.commissionPct=DAILY_BONUS_PCT;changed=true;}});
     else // under the bar: take back only OUR bonus stamp — a hand-set special rate is never touched
       jobs.forEach(j=>{if(+j.commissionPct===DAILY_BONUS_PCT&&base!==DAILY_BONUS_PCT){j.commissionPct=base;changed=true;}});
@@ -1100,7 +1102,7 @@ function normalize(r){
   r.seqE=seqOf(r.equipment);r.seqX=seqOf(r.expenses);r.seqPay=seqOf(r.payouts);
   return r;
 }
-function save(){stampChanges();db.updatedAt=Date.now();localStorage.setItem(DBKEY,JSON.stringify(db));scheduleSync();}
+function save(){applyDailyBonus(db);stampChanges();db.updatedAt=Date.now();localStorage.setItem(DBKEY,JSON.stringify(db));scheduleSync();}
 /* Record a hard delete so a merge with a stale copy from another device can't resurrect it.
    Capped at the newest 500 per collection — plenty for a rolling week of cleanup on any device. */
 function tomb(coll,id){
@@ -2010,11 +2012,10 @@ function createJob(data){
     if(u&&(+u.commissionPct||0)>0){j.closerId=u.id;j.commissionPct=+u.commissionPct;}
   }
   db.jobs.push(j);
-  applyDailyBonus(db); // the 5th close of the day bumps the whole day to 50%
-  save();return j;
+  save();return j; // save() re-runs the daily bonus math
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
-function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);applyDailyBonus(db);save();}
+function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);save();}
 /* Done flow — three-way (owner's bug report: Cancel used to still mark it done, which read as
    "collected"): OK = done + paid · Cancel then OK = done, NOT paid yet · Cancel twice = abort,
    the job stays booked and nothing changes. */
@@ -3995,13 +3996,13 @@ function closesTodayCard(){
   const blocks=reps.map(u=>{
     const jobs=repClosesOn(db,u.id,t).sort((a,b)=>(+a.createdAt||0)-(+b.createdAt||0));
     if(!jobs.length)return"";
-    const bonus=jobs.length>=DAILY_BONUS_AT;
+    const paidN=jobs.filter(jobPaid).length,bonus=paidN>=DAILY_BONUS_AT;
     const sales=jobs.reduce((s,j)=>s+(+j.price||0),0);
     return '<div class="jobline" style="cursor:default">'+
       '<div class="avatar" style="background:'+(u.color||avatarColor(u.name))+'">'+esc(initials(u.name))+'</div>'+
       '<div style="flex:1;min-width:0"><div class="nm">'+esc(u.name)+'</div>'+
         '<div class="sub">'+jobs.length+' close'+(jobs.length!==1?"s":"")+' today · '+esc(money(sales))+'</div></div>'+
-      '<span class="badge '+(bonus?"b-won":"b-scheduled")+'">'+(bonus?"🔥 50%":(+u.commissionPct||0)+"%")+'</span>'+
+      '<span class="badge '+(bonus?"b-won":"b-scheduled")+'">'+(bonus?"🔥 50%":(+u.commissionPct||0)+"% · "+paidN+"/"+DAILY_BONUS_AT+" collected")+'</span>'+
     '</div>'+
     jobs.map(j=>{const c=custById(j.customerId);
       return '<div class="jobline" style="cursor:default;padding-left:52px">'+
@@ -4011,7 +4012,7 @@ function closesTodayCard(){
   }).join("");
   return '<div class="panel"><h2>Today’s closes</h2><div class="panel-pad">'+
     (blocks||'<div class="note">No closes yet today.</div>')+
-    '<div class="hint" style="margin-top:8px">Hit '+DAILY_BONUS_AT+'+ closes in a day and every one of that day’s closes pays '+DAILY_BONUS_PCT+'%.</div>'+
+    '<div class="hint" style="margin-top:8px">Collect '+DAILY_BONUS_AT+'+ of one day’s closes and every close from that day pays '+DAILY_BONUS_PCT+'% — booked but unpaid doesn’t count yet.</div>'+
   '</div></div>';
 }
 function renderTeam(){

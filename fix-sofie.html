@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Patch — Sofie never paid</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px;max-width:640px;margin:0 auto}
+pre{background:#15161c;padding:14px;border-radius:10px;white-space:pre-wrap}</style></head><body>
+<h2>Sofie (Aug 21) never paid — collected $300 → $0</h2>
+<pre id="log"></pre>
+<script>
+"use strict";
+const DBKEY="flyra.v1",FILE="flyra-db.json";
+const log=m=>{const el=document.getElementById("log");el.textContent=el.textContent+m+String.fromCharCode(10);};
+(async function(){
+try{
+  const tok=localStorage.getItem("flyra.synckey"),gid=localStorage.getItem("flyra.syncgist");
+  if(!tok||!gid){log("No sync token in this profile — open this page in the profile that runs the CRM.");return;}
+  const H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+  const g=await (await fetch("https://api.github.com/gists/"+gid,{headers:H})).json();
+  const f=g.files[FILE];
+  const db=JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+  const custs=(db.customers||[]).filter(c=>/^sofie$/i.test(String(c.name||"").trim()));
+  if(custs.length!==1){log("Expected exactly one client named Sofie, found "+custs.length+" — aborting, nothing changed.");return;}
+  const jobs=(db.jobs||[]).filter(j=>j.customerId===custs[0].id&&j.date==="2026-08-21"&&j.status==="done");
+  if(jobs.length!==1){log("Expected exactly one done job for Sofie on 2026-08-21, found "+jobs.length+" — aborting.");return;}
+  const j=jobs[0];
+  if(+j.collected===0){log("Already $0 collected — nothing to do.");return;}
+  if(+j.collected!==300){log("Expected collected $300, found $"+j.collected+" — someone changed it already. Aborting.");return;}
+  const now=Date.now();
+  j.collected=0;j.up=now;
+  db.updatedAt=now;
+  const localRaw=localStorage.getItem(DBKEY);
+  if(localRaw)localStorage.setItem(DBKEY+".backup-sofie-"+now,localRaw);
+  localStorage.setItem(DBKEY,JSON.stringify(db));
+  const res=await fetch("https://api.github.com/gists/"+gid,{method:"PATCH",headers:H,
+    body:JSON.stringify({files:{[FILE]:{content:JSON.stringify(db)}}})});
+  log(res.ok?"Pushed to cloud OK":"Cloud push FAILED ("+res.status+")");
+  log("Sofie job #"+j.id+" ("+j.service+", "+j.date+") collected: $300 → $0. Nobody is owed on it until she pays.");
+  log("DONE — reopen the CRM.");
+}catch(e){log("ERROR: "+e.message);}
+})();
+</script></body></html>
