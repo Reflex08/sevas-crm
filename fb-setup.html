@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect Facebook Lead Ads — Seva's CRM</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#0b0c10;color:#eee;padding:28px 18px;max-width:720px;margin:0 auto;line-height:1.5}
+h1{font-size:22px;margin:0 0 6px}h2{font-size:16px;margin:26px 0 8px;color:#9ad}
+.step{background:#15161c;border-radius:12px;padding:14px 16px;margin:10px 0}
+code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#0b0c10;padding:2px 6px;border-radius:6px;word-break:break-all}
+label{display:block;font-size:12.5px;color:#aab;margin:10px 0 4px}
+input{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #333;background:#0b0c10;color:#eee;font-size:15px}
+button{margin-top:14px;padding:12px 18px;border-radius:10px;border:0;background:#2a6ba8;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
+button:disabled{opacity:.5}
+#out{white-space:pre-wrap;margin-top:12px;font-size:14px}
+.ok{color:#5ed39a}.err{color:#f98080}.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:#233}
+.choose label{display:flex;gap:8px;align-items:center;font-size:15px;color:#eee}
+a{color:#8cf}
+</style></head><body>
+<h1>Connect Facebook Lead Ads</h1>
+<div id="status"><span class="pill">checking…</span></div>
+
+<h2>1 · Create the Meta app (one time)</h2>
+<div class="step">
+Go to <a href="https://developers.facebook.com/apps/" target="_blank">developers.facebook.com/apps</a> → <b>Create App</b> → use case <b>Other</b> → type <b>Business</b> → name it <b>Sevas CRM</b>.<br>
+Then <b>App settings → Basic</b>: copy the <b>App ID</b> and <b>App Secret</b> (click Show) into step 3 below. Leave the app in <b>Development</b> mode — that is all your own Page needs.
+</div>
+
+<h2>2 · Point its webhook here</h2>
+<div class="step">
+In the app: <b>Add product → Webhooks</b> → choose <b>Page</b> → <b>Subscribe to this object</b>:<br>
+Callback URL: <span class="mono" id="cb"></span><br>
+Verify token: <span class="mono" id="vt"></span><br>
+Click <b>Verify and save</b>, then tick <b>leadgen</b> in the field list and Subscribe.
+</div>
+
+<h2>3 · Get a login token and connect</h2>
+<div class="step">
+Open <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Graph API Explorer</a> → pick <b>Sevas CRM</b> as the app → under Permissions add
+<code>pages_show_list</code>, <code>pages_manage_metadata</code>, <code>pages_read_engagement</code>, <code>leads_retrieval</code> →
+<b>Generate Access Token</b> → log in, allow, choose your Page → copy the token.
+<label>App ID</label><input id="appId" inputmode="numeric" autocomplete="off">
+<label>App Secret</label><input id="appSecret" autocomplete="off">
+<label>Access token from Graph API Explorer</label><input id="userToken" autocomplete="off">
+<div id="pages" class="choose"></div>
+<button id="go">Connect</button>
+<div id="out"></div>
+</div>
+
+<h2>4 · Test it</h2>
+<div class="step">
+<a href="https://developers.facebook.com/tools/lead-ads-testing" target="_blank">Lead Ads Testing Tool</a> → pick your Page + form → <b>Create lead</b>. It shows up in the CRM Leads tab within a minute as <b>New · Meta Ads</b>. Delete that test lead afterwards.
+</div>
+
+<script>
+"use strict";
+const RELAY="https://sevas-confirm-relay.confirm-relay.workers.dev",READ_KEY="sv-9f2d71c4e8a35b06",VERIFY="sevas-fb-verify-4d9a";
+document.getElementById("cb").textContent=RELAY+"/fb/webhook";
+document.getElementById("vt").textContent=VERIFY;
+const $=s=>document.querySelector(s),out=$("#out");
+const say=(m,cls)=>{out.textContent=m;out.className=cls||"";};
+async function status(){
+  try{const r=await (await fetch(RELAY+"/fb/status?k="+READ_KEY)).json();
+    $("#status").innerHTML=r.connected?'<span class="pill" style="background:#164">✓ Connected to Page “'+esc(r.page.name)+'” since '+new Date(r.since).toLocaleDateString()+'</span>'
+      :'<span class="pill">Not connected yet</span>';
+  }catch(e){$("#status").innerHTML='<span class="pill">relay unreachable</span>';}
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let chosen="";
+$("#go").onclick=async()=>{
+  const body={appId:$("#appId").value.trim(),appSecret:$("#appSecret").value.trim(),userToken:$("#userToken").value.trim(),pageId:chosen};
+  if(!body.appId||!body.appSecret||!body.userToken){say("Fill in all three fields first.","err");return;}
+  $("#go").disabled=true;say("Talking to Meta…");
+  try{
+    const r=await (await fetch(RELAY+"/fb/setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+    if(r.choose){
+      $("#pages").innerHTML="<label style='color:#aab;font-size:12.5px'>Which Page runs the ads?</label>"+
+        r.choose.map(p=>'<label><input type="radio" name="pg" value="'+esc(p.id)+'"> '+esc(p.name)+'</label>').join("");
+      document.querySelectorAll('input[name="pg"]').forEach(el=>el.onchange=()=>{chosen=el.value;});
+      say("Pick the Page above, then press Connect again.");
+    }else if(r.ok){say("✓ Connected to “"+r.page.name+"”. Leads from its forms now flow straight into the CRM. Do step 2 if you have not yet, then test with step 4.","ok");status();}
+    else say("✗ "+(r.error||"unknown error"),"err");
+  }catch(e){say("✗ "+e.message,"err");}
+  $("#go").disabled=false;
+};
+status();
+</script></body></html>
