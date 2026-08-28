@@ -4669,7 +4669,7 @@ function integrationsCard(){
     '<div class="field"><label>New Facebook leads go to</label><select id="set-fbrep">'+
       activeUsers().map(u=>'<option value="'+u.id+'"'+(+db.settings.fbLeadRep===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("")+
     '</select></div>'+
-    '<div class="hint">Make.com posts each form submission to <code>'+esc(CONFIRM_RELAY)+'/lead</code>; the CRM picks it up within a minute and drops it in Leads as New · Meta Ads.</div>'+
+    '<div class="hint">Connected straight to Meta — set up once at <a href="https://reflex08.github.io/sevas-crm/fb-setup.html" target="_blank" rel="noopener">fb-setup</a>. Every form submission lands in Leads as New · Meta Ads within a minute.</div>'+
     '</div></div>';
 }
 /* Owner PIN — a lock on the owner/manager tile in the who-picker. Owner's own screen only. */
