@@ -775,6 +775,7 @@ const DEFAULT_SETTINGS=()=>({
   monthGoalStart:"", // optional count-from date (owner 2026-08-21: "everything after August 16 counts");
                      // only honored while its month is the current month, otherwise the 1st
   monthGoalBonus:500, // owner 2026-08-21: "everyone is getting a $500 bonus if they hit that 15k goal on time"
+  fbLeadRep:0, // user id that new Facebook Lead Ads leads are assigned to (0 = the owner)
   automation:{followupEveryDays:3,followupMaxTries:5,reviewAskAfterDone:true,reviewLink:"",lastRun:""},
   stripe:{pk:""},
   smsNumber:"",  // Flyra's "custom number" — a label here, nothing dials it locally
@@ -946,6 +947,7 @@ function normalize(r){
   if(typeof s.monthGoalStart!=="string")s.monthGoalStart="2026-08-16";
   if(s.monthGoalStart&&!/^\d{4}-\d{2}-\d{2}$/.test(s.monthGoalStart))s.monthGoalStart="";
   if(!isFinite(+s.monthGoalBonus))s.monthGoalBonus=d.monthGoalBonus;else s.monthGoalBonus=Math.max(0,+s.monthGoalBonus);
+  if(!isFinite(+s.fbLeadRep))s.fbLeadRep=0;else s.fbLeadRep=+s.fbLeadRep;
   s.terms=Object.assign({},d.terms,s.terms||{});
   if(!isFinite(+s.terms.cancelFeePct))s.terms.cancelFeePct=d.terms.cancelFeePct;else s.terms.cancelFeePct=+s.terms.cancelFeePct;
   if(typeof s.terms.text!=="string")s.terms.text=d.terms.text;
@@ -4663,6 +4665,11 @@ function integrationsCard(){
         '<input id="set-sms" value="'+esc(db.settings.smsNumber||"")+'" placeholder="(416) 555-0000"></div>'+
     '</div>'+
     '<div class="note">Simulated locally — connects when hosted online.</div>'+
+    '<div class="sec">Facebook Lead Ads</div>'+
+    '<div class="field"><label>New Facebook leads go to</label><select id="set-fbrep">'+
+      activeUsers().map(u=>'<option value="'+u.id+'"'+(+db.settings.fbLeadRep===u.id?" selected":"")+'>'+esc(u.name)+'</option>').join("")+
+    '</select></div>'+
+    '<div class="hint">Make.com posts each form submission to <code>'+esc(CONFIRM_RELAY)+'/lead</code>; the CRM picks it up within a minute and drops it in Leads as New · Meta Ads.</div>'+
     '</div></div>';
 }
 /* Owner PIN — a lock on the owner/manager tile in the who-picker. Owner's own screen only. */
@@ -4698,6 +4705,7 @@ function bindSettingsEvents(){
     if(delService(+b.dataset.svcdel))renderSettings();});
   const sa=$("#svc-add");if(sa)sa.onclick=()=>{addService();renderSettings();};
   const g=$("#set-goal");if(g)g.onchange=()=>{db.settings.goal=Math.max(0,+g.value||0);save();toast("Saved","ok");};
+  const fr=$("#set-fbrep");if(fr)fr.onchange=()=>{db.settings.fbLeadRep=+fr.value||0;save();toast("Facebook leads → "+(userById(+fr.value)||{}).name,"ok");};
   const fp=$("#set-feepct");if(fp)fp.onchange=()=>{
     db.settings.terms.cancelFeePct=Math.max(0,Math.min(100,+fp.value||0));save();toast("Saved","ok");};
   const tt=$("#set-termstext");if(tt)tt.onchange=()=>{
@@ -4799,6 +4807,48 @@ async function pullConfirmations(){
     });
     if(stamped){save();render();toast((names.join(", ")||"A client")+" confirmed the booking ✓","ok");}
   }catch(e){} // relay down = nothing happens; the manual ✓ chip still works
+}
+/* Facebook Lead Ads (owner 2026-08-26: "sends leads to my phone the second someone submits a
+   form"): Meta → Make.com (instant trigger) → relay /lead → polled here on the same minute tick
+   as confirmations. Each form submission becomes a New lead tagged Meta Ads, assigned to the
+   rep chosen in Settings → Integrations; a repeat submission from a known number logs on the
+   existing record instead of creating a twin. Meta's lead id is kept as fbLeadId so a relay
+   replay can never double-import. */
+const LEAD_SEEN="flyra.leadseen";
+function importLead(rec,names){ // pure on db — the network wrapper is pullLeads()
+  const id=String(rec.id||"");
+  if(id&&db.customers.some(c=>c.fbLeadId===id))return false;
+  const digits=v=>cleanNum(v).replace(/^\+?1(?=\d{10}$)/,""); // Meta sends +14165551234, the book holds (416) 555-1234
+  const ph=digits(rec.phone);
+  const ex=ph?db.customers.find(c=>digits(c.phone)===ph):null;
+  const note=[rec.form?"Form: "+rec.form:"",rec.ad?"Ad: "+rec.ad:"",rec.answers||""].filter(Boolean).join("\n");
+  if(ex){
+    ex.log=ex.log||[];ex.log.push({t:Date.now(),m:"📣 Submitted a Facebook form again"+(note?" — "+note.slice(0,120):"")});
+    if(id)ex.fbLeadId=id;
+    names.push(ex.name);return true;
+  }
+  const rp=userById(+db.settings.fbLeadRep)||activeUsers()[0]||db.users[0];
+  const c=createCust({name:rec.name||("Facebook lead "+(rec.phone||"")),phone:rec.phone||"",email:rec.email||"",
+    street:rec.street||"",city:rec.city||"Toronto",stage:"new",source:"Meta Ads",ownerId:rp?rp.id:1,
+    tags:[],followup:"",notes:note,fbLeadId:id});
+  c.log=c.log||[];c.log.push({t:Date.now(),m:"📣 Came in from a Facebook lead form"});
+  names.push(c.name);return true;
+}
+async function pullLeads(){
+  try{
+    const since=+localStorage.getItem(LEAD_SEEN)||0;
+    const res=await fetch(CONFIRM_RELAY+"/leads?since="+since+"&k="+CONFIRM_RELAY_KEY);
+    if(!res.ok)return;
+    const list=await res.json();
+    if(!Array.isArray(list)||!list.length)return;
+    const names=[];let n=0;
+    list.forEach(rec=>{
+      if(importLead(rec,names))n++;
+      if((+rec.t||0)>+(localStorage.getItem(LEAD_SEEN)||0))localStorage.setItem(LEAD_SEEN,String(rec.t));
+    });
+    if(n){save();render();toast("📣 New Facebook lead: "+names.join(", "),"ok");
+      try{if(navigator.vibrate)navigator.vibrate([80,40,80]);}catch(e){}}
+  }catch(e){} // relay down = leads wait in the relay (30 days) for the next tick
 }
 /* ---- mergeDb: pure record-level merge, never mutates either argument ----
    customers first (others reference customerId), then users (jobs reference closerId) — both are
@@ -4943,6 +4993,7 @@ async function syncPull(){
     if(!dbEquivalent(merged,db)){adoptCloud(merged);toast("Synced from your other device","ok");}
     if(!dbEquivalent(merged,remote))await syncPush(); // this device had something the cloud didn't — send it back
     await pullConfirmations(); // piggybacks on the same minute tick — cheap no-op when nothing new
+    await pullLeads();
     paintSyncChip();return true;
   }catch(e){syncState="err";paintSyncChip();return false;}
 }
