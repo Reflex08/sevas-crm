@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sync key — Seva's CRM</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px 20px;max-width:520px;margin:0 auto;text-align:center}
+a,button{display:inline-block;margin-top:18px;padding:14px 22px;border-radius:12px;border:0;background:#2a6ba8;color:#fff;font-weight:700;font-size:16px;text-decoration:none;cursor:pointer}
+p{color:#aab}</style></head><body>
+<h2 id="msg">Setting up sync…</h2>
+<p id="sub"></p>
+<script>
+"use strict";
+/* Opened from a QR / link with the sync token after the # — the hash never leaves the phone
+   (browsers do not send it to any server). Writes the key this origin's CRM reads and jumps in. */
+(function(){
+  var t=(location.hash||"").replace(/^#/,"").trim();
+  var msg=document.getElementById("msg"),sub=document.getElementById("sub");
+  if(!/^gh[po]_[A-Za-z0-9_]{20,255}$/.test(t)){
+    msg.textContent="No sync key in this link";
+    sub.textContent="Open the exact link / QR you were given — it carries the key after the # sign.";
+    return;
+  }
+  try{
+    localStorage.setItem("flyra.synckey",t);
+    localStorage.removeItem("flyra.syncgist"); // re-find the gist with the fresh key
+    history.replaceState(null,"",location.pathname); // scrub the key from the address bar
+    msg.textContent="✓ Sync key installed";
+    sub.innerHTML="This phone will reconnect on the next sync tick.";
+    var a=document.createElement("a");a.href="./flyra/";a.textContent="Open the CRM";
+    document.body.appendChild(a);
+  }catch(e){msg.textContent="Could not save the key";sub.textContent=String(e);}
+})();
+</script></body></html>
