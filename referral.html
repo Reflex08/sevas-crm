@@ -63,6 +63,11 @@ function esc(s){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });
 }
+/* Links sent before 2026-09-16 carry the CRM's never-edited demo business ("Flyra Demo Co.",
+   (416) 555-0100) — the receipt text went to a stranger. Repair them on read. */
+var REAL_BIZ="Seva's Services",REAL_PHONE="6475704675";
+function realBiz(name){return /^flyra demo co\.?$/i.test(String(name||"").trim())?REAL_BIZ:String(name||"");}
+function realPhone(ph){var d=String(ph||"").replace(/[^\d]/g,"");return (d==="4165550100"||d==="14165550100"||!d)?REAL_PHONE:d;}
 function fromBase64Url(str){
   str=String(str||"").replace(/-/g,"+").replace(/_/g,"/");
   while(str.length%4)str+="=";
@@ -80,10 +85,10 @@ function parseData(){
   var d;
   try{ d=JSON.parse(fromBase64Url(raw)); }catch(e){ return null; }
   if(!d||typeof d!=="object")return null;
-  if(!d.biz||!d.ref)return null;
+  if(!d.ref)return null; // business name/phone self-repair below
   if(!isFinite(+d.tg)||!isFinite(+d.yg))return null;
   return {
-    biz:String(d.biz),ph:String(d.ph||"").replace(/[^\d+]/g,""),ref:String(d.ref),
+    biz:realBiz(d.biz),ph:realPhone(d.ph),ref:String(d.ref),
     cid:isFinite(+d.cid)?+d.cid:0,
     tg:+d.tg,yg:+d.yg,gc:isFinite(+d.gc)?+d.gc:0
   };

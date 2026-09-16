@@ -48,6 +48,9 @@
   .confirmed .note{margin-top:6px;color:var(--muted);font-size:13px}
   .call{display:block;text-align:center;margin-top:18px;color:var(--muted);font-size:13px;text-decoration:none}
   .call a{color:var(--sky)}
+  .msgbox{margin-top:12px;background:#0d0e12;border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;color:var(--ink);font-size:13.5px;text-align:left;white-space:pre-wrap}
+  .cta.ghost{background:transparent;color:var(--sky);border:1px solid var(--line);margin-top:10px}
   .err-word{font-size:20px;font-weight:800;font-style:italic;text-align:center;margin-bottom:22px;color:var(--muted)}
   .err-card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px;text-align:center;
     color:var(--muted);font-size:14px}
@@ -70,6 +73,11 @@ function smsNum(p){
   if(d.length===11&&d.charAt(0)==="1")return "+"+d;
   return d;
 }
+/* Links sent before 2026-09-16 carry the CRM's never-edited demo business ("Flyra Demo Co.",
+   (416) 555-0100) — the receipt text went to a stranger. Repair them on read. */
+var REAL_BIZ="Seva's Services",REAL_PHONE="6475704675";
+function realBiz(name){return /^flyra demo co\.?$/i.test(String(name||"").trim())?REAL_BIZ:String(name||"");}
+function realPhone(ph){var d=String(ph||"").replace(/[^\d]/g,"");return (d==="4165550100"||d==="14165550100"||!d)?REAL_PHONE:d;}
 function fromBase64Url(str){
   str=String(str||"").replace(/-/g,"+").replace(/_/g,"/");
   while(str.length%4)str+="=";
@@ -91,11 +99,11 @@ function fmtTime12(t){
 function fmtLongDate(dt){
   var d=new Date(dt+"T12:00:00");
   if(isNaN(d.getTime()))return "";
-  return d.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
+  return d.toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric"});
 }
 function fmtMoney(p){
   var n=+p;if(!isFinite(n))n=0;
-  return "$"+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  return "$"+n.toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 function renderError(){
   document.getElementById("app").innerHTML=
@@ -109,12 +117,12 @@ function parseData(){
   var d;
   try{ d=JSON.parse(fromBase64Url(raw)); }catch(e){ return null; }
   if(!d||typeof d!=="object")return null;
-  if(!d.b||!d.ph||!d.n||!d.s||!d.dt||typeof d.p==="undefined")return null;
+  if(!d.n||!d.s||!d.dt||typeof d.p==="undefined")return null; // business name/phone self-repair below
   if(!isFinite(+d.p))return null;
   var svcs=Array.isArray(d.svcs)?d.svcs.filter(function(v){return v&&v.s&&isFinite(+v.p);})
     .map(function(v){return {s:String(v.s),p:+v.p};}):[];
   return {
-    b:String(d.b),ph:String(d.ph).replace(/[^\d+]/g,""),n:String(d.n),s:String(d.s),
+    b:realBiz(d.b),ph:realPhone(d.ph),n:String(d.n),s:String(d.s),
     dt:String(d.dt),t:d.t?String(d.t):"",p:+d.p,f:isFinite(+d.f)?+d.f:0,
     x:typeof d.x==="string"?d.x:"",svcs:svcs,
     j:Array.isArray(d.j)?d.j.map(Number).filter(function(n){return isFinite(n)&&n>0;}):[],
@@ -166,7 +174,7 @@ function render(){
     '<div id="cta-area">'+
       '<button class="cta" id="agree-btn" disabled>Agree &amp; Confirm</button>'+
     '</div>'+
-    (d.ph?'<div class="call">Prefer to call? <a href="tel:+'+esc(d.ph)+'">'+esc(phoneFmt)+'</a></div>':'');
+    (d.ph?'<div class="call">Prefer to call? <a href="tel:'+esc(smsNum(d.ph))+'">'+esc(phoneFmt)+'</a></div>':'');
   var check=document.getElementById("tc-check");
   var review=document.getElementById("tc-review");
   var btn=document.getElementById("agree-btn");
@@ -178,12 +186,26 @@ function render(){
   };
   if(btn)btn.onclick=function(){
     if(check&&!check.checked)return;
+    var msg="CONFIRMED ✓ — "+d.n+", "+d.s+" on "+longDate+(timeStr?", "+timeStr:"")+
+      ". I agree to the terms and conditions, including the "+d.f+"% cancellation fee.";
+    var smsHref="sms:"+smsNum(d.ph)+"?&body="+encodeURIComponent(msg);
     document.getElementById("cta-area").innerHTML=
       '<div class="confirmed">'+
         '<div class="ck">&#10003;</div>'+
         '<div class="headline">Confirmed &mdash; thank you!</div>'+
-        '<div class="note">A confirmation text is opening &mdash; please press send, it&#39;s your receipt.</div>'+
+        '<div class="note">Your messages app is opening &mdash; press send, it&#39;s your receipt.</div>'+
+        '<div class="msgbox">'+esc(msg)+'</div>'+
+        '<div class="note">Didn&#39;t open? Text it to <b>'+esc(phoneFmt)+'</b>:</div>'+
+        '<a class="cta" href="'+esc(smsHref)+'" style="display:block;text-decoration:none">Text '+esc(phoneFmt)+'</a>'+
+        '<button class="cta ghost" id="copy-btn">Copy message</button>'+
       '</div>';
+    var copyBtn=document.getElementById("copy-btn");
+    if(copyBtn)copyBtn.onclick=function(){
+      var done=function(){copyBtn.textContent="Copied ✓ — paste it in a text to "+phoneFmt;};
+      if(navigator.clipboard&&navigator.clipboard.writeText)
+        navigator.clipboard.writeText(msg).then(done).catch(function(){prompt("Copy this message:",msg);});
+      else prompt("Copy this message:",msg);
+    };
     // Tell the CRM directly — it polls the relay every minute and marks the booking
     // confirmed by itself (no more checking email + tapping the chip by hand).
     if(d.j.length){
@@ -208,9 +230,7 @@ function render(){
           terms_shown:termsText
         })}).catch(function(){});
     }catch(e){}
-    var msg="CONFIRMED ✓ — "+d.n+", "+d.s+" on "+longDate+(timeStr?", "+timeStr:"")+
-      ". I agree to the terms including the "+d.f+"% cancellation fee.";
-    if(d.ph)location.href="sms:"+smsNum(d.ph)+"?&body="+encodeURIComponent(msg);
+    location.href=smsHref;
   };
 }
 render();

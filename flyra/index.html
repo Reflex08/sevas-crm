@@ -572,12 +572,12 @@ function localISO(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(
 function today(){return localISO(new Date());}
 function offset(n){const d=new Date();d.setDate(d.getDate()+n);return localISO(d);}
 function fmtDate(d,opt){if(!d)return"—";const x=new Date(d+"T00:00:00");
-  return x.toLocaleDateString(undefined,opt||{month:"short",day:"numeric",year:"numeric"});}
-function fmtDateShort(d){if(!d)return"—";const x=new Date(d+"T00:00:00");return x.toLocaleDateString(undefined,{month:"short",day:"numeric"});}
-function fmtDow(d){if(!d)return"";const x=new Date(d+"T00:00:00");return x.toLocaleDateString(undefined,{weekday:"short"});}
+  return x.toLocaleDateString("en-US",opt||{month:"short",day:"numeric",year:"numeric"});}
+function fmtDateShort(d){if(!d)return"—";const x=new Date(d+"T00:00:00");return x.toLocaleDateString("en-US",{month:"short",day:"numeric"});}
+function fmtDow(d){if(!d)return"";const x=new Date(d+"T00:00:00");return x.toLocaleDateString("en-US",{weekday:"short"});}
 function fmtTime(t){if(!t)return"";const[h,m]=t.split(":").map(Number);const ap=h>=12?"PM":"AM";const hh=((h+11)%12)+1;
   return hh+":"+String(m).padStart(2,"0")+" "+ap;}
-function fmtWhen(ts){return new Date(ts).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});}
+function fmtWhen(ts){return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});}
 function initials(name){const p=(name||"").trim().split(/\s+/);return ((p[0]||"")[0]||"?").toUpperCase()+((p[1]||"")[0]||"").toUpperCase();}
 function firstName(n){return (n||"").trim().split(/\s+/)[0]||"";}
 function avatarColor(name){name=name||"";let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);
@@ -767,7 +767,7 @@ const MSG_KINDS={
 const TPL_FOR={reminder:"t1",followup:"t2",review:"t3"}; // kind → template id (names stay fixed)
 const MSG_VARS=["{firstname}","{name}","{service}","{date}","{time}","{business}"];
 const DEFAULT_SETTINGS=()=>({
-  business:{name:"Flyra Demo Co.",phone:"(416) 555-0100",email:"hello@example.com"},
+  business:{name:"Seva's Services",phone:"(647) 570-4675",email:"info@sevasservices.com"},
   services:JSON.parse(JSON.stringify(DEFAULT_SERVICES)),
   templates:JSON.parse(JSON.stringify(DEFAULT_TEMPLATES)),
   goal:50000,
@@ -886,26 +886,31 @@ function newDb(){
   return normalize({v:1,settings,users,customers,jobs,invoices,plans,pins,messages,equipment,expenses,payouts:[]});
 }
 
-/* Daily closer bonus (owner order 2026-08-20): reps earn their base rate per close, but 5 or
-   more closes BOOKED in one day bumps every one of that day's closes to 50%. Recomputed over
-   the last 7 days on load and after every booking/delete — a same-day delete that drops a rep
-   under 5 takes the bonus back; older stamps are history and never rewritten. Lives above
-   normalize() because normalize calls it during the initial load. */
+/* Daily closer bonus (owner order 2026-08-20, bar 4 + collected-only 2026-08-26): a rep's closes
+   BOOKED on one day all pay 50% once 4 of them are collected. Lives above normalize() because
+   normalize calls it during the initial load.
+   2026-09-16: a phone that went two weeks without syncing (dead token) kept un-bumping days it saw
+   as under the bar, and its newer edit stamps won the merge — days ended half 50% / half 25% and
+   were paid out that way. So the rule is now bump-UP-only everywhere, over every booking day since
+   BONUS_ERA_START (a late 4th collection still unlocks the day). Taking a bonus back happens only
+   on the device where a human undid or deleted a job (downKeys). */
 const DAILY_BONUS_AT=4,DAILY_BONUS_PCT=50; // owner 2026-08-21: "now it's 4 sales to 50%, not 5"
 function closedDay(j){return (+j.createdAt||0)?localISO(new Date(+j.createdAt)):"";}
 function repClosesOn(data,uid,dayISO){
   return data.jobs.filter(j=>j.closerId===uid&&!(Array.isArray(j.splits)&&j.splits.length)&&
     j.status!=="cancelled"&&closedDay(j)===dayISO);
 }
-function applyDailyBonus(data){
-  const cut=Date.now()-7*86400000;
+const BONUS_ERA_START="2026-08-19"; // earlier booking days are frozen history (import-day batch, the old 5-close bar)
+function bonusKey(j){return j&&j.closerId?j.closerId+"|"+closedDay(j):"";}
+function applyDailyBonus(data,downKeys){
   const groups={}; // "uid|day" → jobs
   data.jobs.forEach(j=>{
     if(!j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled")return;
-    if((+j.createdAt||0)<cut)return;
+    const day=closedDay(j);
+    if(!day||day<BONUS_ERA_START)return;
     const u=(data.users||[]).find(x=>x.id===j.closerId);
     if(!u||u.role!=="sales")return;
-    (groups[j.closerId+"|"+closedDay(j)]=groups[j.closerId+"|"+closedDay(j)]||[]).push(j);
+    (groups[j.closerId+"|"+day]=groups[j.closerId+"|"+day]||[]).push(j);
   });
   let changed=false;
   Object.entries(groups).forEach(([key,jobs])=>{
@@ -915,7 +920,7 @@ function applyDailyBonus(data){
     // I collect that fourth sale first". Booked-but-unpaid closes don't count toward the 4.
     if(jobs.filter(jobPaid).length>=DAILY_BONUS_AT)
       jobs.forEach(j=>{if(+j.commissionPct!==DAILY_BONUS_PCT){j.commissionPct=DAILY_BONUS_PCT;changed=true;}});
-    else // under the bar: take back only OUR bonus stamp — a hand-set special rate is never touched
+    else if(downKeys&&downKeys.has(key)) // under the bar: take back only OUR bonus stamp — a hand-set special rate is never touched
       jobs.forEach(j=>{if(+j.commissionPct===DAILY_BONUS_PCT&&base!==DAILY_BONUS_PCT){j.commissionPct=base;changed=true;}});
   });
   return changed;
@@ -927,7 +932,13 @@ function normalize(r){
   const d=DEFAULT_SETTINGS();
   if(!r.settings||typeof r.settings!=="object")r.settings=d;
   const s=r.settings;
-  if(!s.business)s.business=d.business;
+  if(!s.business||typeof s.business!=="object")s.business=d.business;
+  // The demo business was never edited in the live book (found 2026-09-16): every confirmation,
+  // plan and referral link said "Flyra Demo Co." and a client's Agree text went to (416) 555-0100 —
+  // a stranger. Only the exact demo values move; anything the owner typed stays.
+  if(/^flyra demo co\.?$/i.test(String(s.business.name||"").trim()))s.business.name=d.business.name;
+  if(String(s.business.phone||"").replace(/\D/g,"")==="4165550100")s.business.phone=d.business.phone;
+  if(String(s.business.email||"").trim().toLowerCase()==="hello@example.com")s.business.email=d.business.email;
   if(!Array.isArray(s.services)||!s.services.length)s.services=d.services;
   if(!Array.isArray(s.templates)||!s.templates.length)s.templates=d.templates;
   if(typeof s.goal!=="number")s.goal=d.goal;
@@ -1010,6 +1021,7 @@ function normalize(r){
     if(!Array.isArray(c.log))c.log=[];
     if(!c.stage||!STAGES.some(x=>x.id===c.stage))c.stage="new";
     if(typeof c.excuse!=="string")c.excuse="";
+    if(c.geo!=null&&(typeof c.geo!=="object"||typeof c.geo.key!=="string"))delete c.geo;
     // "Seva CRM" was the old importer's stamp, not a lead source — owner: those are door-to-door
     if(c.source==="Seva CRM")c.source="Door-to-door";
   });
@@ -1035,7 +1047,9 @@ function normalize(r){
      // undo the short-lived 2026-08-19 rule that made the tech a CLOSER — a tech never closes
      if(j.closerId){const u=r.users.find(x=>x.id===j.closerId);
        if(u&&u.role==="tech"){j.closerId=null;j.commissionPct=0;}}
-     if(j.status!=="cancelled")stampCleaner(j,r.users);
+     // backfill ONLY the hire-week era this was written for — later jobs are stamped live on Done.
+     // Unbounded, reactivating him would stamp his rate onto every job done while he was gone.
+     if(j.status!=="cancelled"&&(j.date||"")<="2026-08-21")stampCleaner(j,r.users);
    });
    applyDailyBonus(r); // DAILY_BONUS_AT+ same-day closes = 50% on all of them — recomputed on every load
   }
@@ -1151,7 +1165,7 @@ function revenueByMonth(n){
   for(let i=n-1;i>=0;i--){const dt=new Date(base.getFullYear(),base.getMonth()-i,1);
     const ym=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");
     const total=db.jobs.filter(j=>j.status!=="cancelled"&&(j.date||"").slice(0,7)===ym).reduce((s,j)=>s+(+j.collected||0),0);
-    out.push({ym,label:dt.toLocaleDateString(undefined,{month:"short"}),year:dt.getFullYear(),total});}
+    out.push({ym,label:dt.toLocaleDateString("en-US",{month:"short"}),year:dt.getFullYear(),total});}
   return out;
 }
 /* Revenue card series for the period seg (week/month/quarter/year/all). */
@@ -1312,7 +1326,7 @@ function todayPriorities(){
     items.push({icon:"⚠️",text:"Overdue — "+(c?c.name:"customer")+"'s "+j.service+" was due "+fmtDateShort(j.date),view:"schedule"});});
   db.messages.filter(m=>m.status==="queued"&&m.dueAt<=t).forEach(m=>{
     const c=custById(m.customerId);
-    items.push({icon:"💬",text:(m.kind==="review"?"Review request":"Follow-up text")+" due — "+(c?c.name:"customer"),view:"messages"});});
+    items.push({icon:"💬",text:kindMeta(m.kind).label+" text due — "+(c?c.name:"customer"),view:"messages"});});
   return items.slice(0,5);
 }
 /* Activity feed: every customer's log, flattened and time-sorted, newest first. */
@@ -1414,7 +1428,10 @@ function render(){
   // no ＋ on settings/reports (nothing to add), team (payroll — owner order), or messages in rep mode (blast is owner-only)
   document.body.classList.toggle("no-fab",view==="settings"||view==="reports"||view==="team"||view==="map"||(view==="messages"&&isRep()));
   paintWhoFoot();
-  (view==="dashboard"&&isRep()?renderRepHome:VIEWS[view])();
+  // render() runs at boot BEFORE sync starts and inside every sync merge (adoptCloud) — a throw
+  // here once left a phone that last had Messages open never syncing again (2026-09-16).
+  try{(view==="dashboard"&&isRep()?renderRepHome:VIEWS[view])();}
+  catch(e){console.error("render "+view,e);toast("Couldn’t draw this screen — your data is safe","err");}
 }
 
 /* ---------------- Screens ---------------- */
@@ -1432,7 +1449,7 @@ function greetWord(h){return h<12?"Good morning":h<18?"Good afternoon":"Good eve
 function heroFirstName(){
   const me=whoUser();
   if(me&&me.name)return firstName(me.name);
-  return firstName((db.settings.business&&db.settings.business.name||"").replace(/'s$/i,""))||"Seva";
+  return firstName(db.settings.business&&db.settings.business.name||"").replace(/['’]s$/i,"")||"Seva";
 }
 function heroGreetHTML(){
   return '<div class="hero"><div class="gr-word">'+esc(greetWord(new Date().getHours()))+'</div>'+
@@ -1451,7 +1468,7 @@ const PILL_SEL="border-radius:999px;padding:6px 12px;background:#0d0e12;border:1
    name on the ARR tab, else the range-label pill text (already computed for the pill) + " Revenue". */
 function revenueTitle(){
   if(dashRevTab==="arr")return "Annual Recurring Revenue";
-  if(dashRevPeriod==="month")return new Date().toLocaleDateString(undefined,{month:"long",year:"numeric"})+" Revenue";
+  if(dashRevPeriod==="month")return new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"})+" Revenue";
   return heroRangeLabel()+" Revenue";
 }
 function revenuePanel(){
@@ -1489,7 +1506,7 @@ function revenuePanel(){
   '</div></div>';
 }
 function leaderboardPanel(){
-  const mon=new Date().toLocaleDateString(undefined,{month:"long"});
+  const mon=new Date().toLocaleDateString("en-US",{month:"long"});
   const rows=leaderboardRows(lbMetric);
   const metricOpts=[["sales","Sales"],["commission","Commission"]]
     .map(([v,l])=>'<option value="'+v+'" '+(lbMetric===v?"selected":"")+'>'+l+'</option>').join("");
@@ -1550,7 +1567,7 @@ function monthGoalCard(readOnly){
   const left=Math.max(0,goal-rev);
   const needPerDay=left>0?left/Math.max(1,span-day):0;
   const onPace=day>0?rev/day*span:0;
-  const monthName=new Date(t+"T12:00:00").toLocaleDateString(undefined,{month:"long"});
+  const monthName=new Date(t+"T12:00:00").toLocaleDateString("en-US",{month:"long"});
   const sinceTag=startDay>1?' · since '+esc(fmtDateShort(start)):'';
   const bonus=+db.settings.monthGoalBonus||0;
   const bonusLine=(bonus>0&&goal>0)?'<div class="hint" style="margin-top:4px">🎁 '+
@@ -1746,6 +1763,7 @@ function renderRepHome(){
     if(completeJobFlow(+b.dataset.repdone))renderRepHome();else toast("Left as booked","ok");});
   document.querySelectorAll("[data-jobcard]").forEach(el=>el.onclick=()=>openJob(+el.dataset.jobcard));
   document.querySelectorAll("[data-repcust]").forEach(el=>el.onclick=()=>openCustProfile(+el.dataset.repcust));
+  pregeocode(repDayJobs(me));
 }
 /* ---------------- Map (restored 2026-08-20 — owner: "steal it from Flyra, exactly") ----------------
    The only screen that touches the network, and only while it is open:
@@ -1771,16 +1789,114 @@ function applyBase(){
     {maxZoom:19}).addTo(mapInst);
   const el=$("#map-canvas");if(el&&el.classList)el.classList.toggle("sat",mapBase==="sat"); // dark-invert is for streets only
 }
-/* Address lookup (Nominatim, free, no key) — fired only by a user's map tap, never at startup. */
+/* The ONE Nominatim call site (free, no key) — map-tap reverse lookups and the Waze address
+   resolver below share it. Serialized ≥1.1s apart: Nominatim's usage policy is 1 request/second.
+   Resolves null on any network/HTTP error. */
+let nomLast=0,nomChain=Promise.resolve();
+function nominatim(path){
+  const run=()=>{
+    const wait=Math.max(0,nomLast+1100-Date.now());
+    return (wait?new Promise(r=>setTimeout(r,wait)):Promise.resolve()).then(()=>{
+      nomLast=Date.now();
+      return fetch("https://nominatim.openstreetmap.org/"+path).then(r=>r.ok?r.json():null).catch(()=>null);
+    });
+  };
+  const p=nomChain.then(run,run);nomChain=p.catch(()=>null);return p;
+}
+/* Address lookup for a map tap — fired only by a user's tap, never at startup. */
 function lookupAddress(lat,lng){
-  return fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat="+
-      encodeURIComponent(lat)+"&lon="+encodeURIComponent(lng))
-    .then(r=>r.json())
+  return nominatim("reverse?format=jsonv2&lat="+encodeURIComponent(lat)+"&lon="+encodeURIComponent(lng))
     .then(d=>{
+      if(!d)return "";
       const a=d.address||{};
       const line=[a.house_number,a.road].filter(Boolean).join(" ");
       return line||((d.display_name||"").split(",").slice(0,2).join(",").trim());
-    }).catch(()=>"");
+    });
+}
+/* ---- Waze precision (owner 2026-09-16: "I click an address and it goes to a whole different one") ----
+   Waze's text search guesses when a city is blank (97 clients) or wrong (Vaughan houses saved as
+   "Toronto" — the form pre-fills it). So a client's address is resolved ONCE to the exact house,
+   bounded to the GTA, and cached on the customer (synced — no phone asks twice). On the live book
+   34 of 45 addresses pinned house-exact, "Blue Willow drive, Toronto" correctly to Vaughan.
+   Two refusals keep it from ever pinning the WRONG house:
+   - only a house-number match counts (a street centroid can be kilometres off on Dufferin St);
+   - a match outside the city on file must sit on a street name found in ONE municipality
+     ("Prince Charles Drive" exists in Toronto AND Georgetown → refused).
+   Refused or not found → Waze's own search, with ", ON, Canada" appended. */
+const GTA_VIEWBOX="-79.95,44.15,-78.85,43.45"; // Mississauga/Brampton → Pickering, lakeshore → Newmarket
+const geoBusy=new Set();
+function addrKey(c){return ((c.street||"")+"|"+(c.city||"")).trim().toLowerCase().replace(/\s+/g," ");}
+function addrLine(c){ // "street, city" without doubling a city the street field already carries
+  const st=(c.street||"").trim(),city=(c.city||"").trim();
+  if(!city||st.toLowerCase().includes(city.toLowerCase()))return st;
+  return st?st+", "+city:city;
+}
+function geoFor(c){const g=c&&c.geo;return g&&g.key===addrKey(c)&&!g.miss&&isFinite(+g.lat)&&isFinite(+g.lng)?g:null;}
+function wazeHref(c){
+  const g=geoFor(c);
+  if(g)return "https://waze.com/ul?ll="+(+g.lat)+","+(+g.lng)+"&navigate=yes";
+  let q=addrLine(c);
+  if(!/\b(on|ontario|canada)\b/i.test(q))q+=", ON, Canada";
+  return "https://waze.com/ul?q="+encodeURIComponent(q)+"&navigate=yes";
+}
+function wazeLabel(c){const g=geoFor(c);return g&&g.label?g.label:addrLine(c);}
+const geoMuni=a=>(a&&(a.city||a.town||a.village||a.municipality))||"";
+const geoHouse=r=>!!(r&&r.address&&r.address.house_number);
+function geoCityOk(r,city){
+  const m=geoMuni(r&&r.address).toLowerCase(),k=String(city||"").trim().toLowerCase();
+  return !!k&&!!m&&(m.includes(k)||k.includes(m));
+}
+function geoLabel(r){const a=r.address||{};return [[a.house_number,a.road].filter(Boolean).join(" "),geoMuni(a)].filter(Boolean).join(", ");}
+/* PURE decision, so the gate can prove the refusals offline. first = search("street, city"),
+   cand = the match without the city, roads = search(cand's road name) — each null if not fetched. */
+function pickGeo(city,first,cand,roads){
+  if(geoHouse(first)&&geoCityOk(first,city))return first; // the house, in the city on file
+  if(!geoHouse(cand))return null;
+  const munis=new Set((roads||[]).map(x=>geoMuni(x.address)).filter(Boolean));
+  return munis.size===1&&munis.has(geoMuni(cand.address))?cand:null; // that street exists in ONE town only
+}
+function geoSearch(q,limit){
+  return nominatim("search?format=jsonv2&addressdetails=1&countrycodes=ca&bounded=1&viewbox="+GTA_VIEWBOX+
+    "&limit="+limit+"&q="+encodeURIComponent(q));
+}
+/* → true when the customer's geo was (re)written. A network error caches nothing (the next open
+   retries); a clean no-match is cached as a miss for THIS address only (an edit retries). */
+async function geocodeCust(c){
+  if(!c||!(c.street||"").trim()||navigator.onLine===false)return false;
+  const key=addrKey(c);
+  if((c.geo&&c.geo.key===key)||geoBusy.has(key))return false;
+  geoBusy.add(key);
+  try{
+    const city=(c.city||"").trim(),street=c.street.trim();
+    const r1=await geoSearch(addrLine(c),1);if(!r1)return false;
+    const first=r1[0]||null;let cand=null,roads=null;
+    if(!(geoHouse(first)&&geoCityOk(first,city))){
+      if(city){const r2=await geoSearch(street,1);if(!r2)return false;cand=r2[0]||null;}
+      else cand=first;
+      if(geoHouse(cand)&&cand.address.road){roads=await geoSearch(cand.address.road,5);if(!roads)return false;}
+    }
+    const hit=pickGeo(city,first,cand,roads);
+    const cur=custById(c.id);if(!cur||addrKey(cur)!==key)return false; // address edited mid-lookup
+    cur.geo=hit?{key,lat:+(+hit.lat).toFixed(6),lng:+(+hit.lon).toFixed(6),label:geoLabel(hit),t:Date.now()}
+      :{key,miss:true,t:Date.now()};
+    save();return true;
+  }finally{geoBusy.delete(key);}
+}
+function paintWazeLink(cid){
+  const a=$("#job-waze");if(!a||+a.dataset.cid!==cid)return;
+  const c=custById(cid);if(!c)return;
+  a.href=wazeHref(c);a.textContent="📍 "+wazeLabel(c);
+}
+/* Resolve the addresses the crew is about to drive to — after first paint; cached for good. */
+function pregeocode(jobs){
+  setTimeout(()=>{
+    const seen=new Set();
+    (jobs||[]).forEach(j=>{
+      if(j.status!=="scheduled"||seen.has(j.customerId))return;seen.add(j.customerId);
+      const c=custById(j.customerId);
+      if(c)geocodeCust(c).then(ch=>{if(ch)paintWazeLink(c.id);});
+    });
+  },1500);
 }
 
 /* Cached promise = one download per session. A failure clears the cache so re-opening retries. */
@@ -1826,6 +1942,7 @@ function pinToLead(id){
   const c={id:db.seqC++,name:"Lead @ "+(p.address||p.lat.toFixed(4)+", "+p.lng.toFixed(4)),phone:"",email:"",
     street:p.address||"",city:"Toronto",lat:p.lat,lng:p.lng,stage:"new",source:"Door-to-door",tags:[],excuse:"",
     notes:p.note||"",log:[{t:now,m:"Created from a map pin."}],createdAt:now,ownerId:p.userId||1,followup:""};
+  if(c.street)c.geo={key:addrKey(c),lat:p.lat,lng:p.lng,label:c.street,t:now}; // the pin is the exact house
   db.customers.push(c);p.customerId=c.id;save();return c;
 }
 
@@ -2022,7 +2139,12 @@ function createJob(data){
   save();return j; // save() re-runs the daily bonus math
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
-function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);save();}
+function deleteJob(id){
+  const key=bonusKey(db.jobs.find(x=>x.id===id));
+  tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);
+  if(key)applyDailyBonus(db,new Set([key])); // this device's human removed a close — the day may drop under the bar
+  save();
+}
 /* Done flow — three-way (owner's bug report: Cancel used to still mark it done, which read as
    "collected"): OK = done + paid · Cancel then OK = done, NOT paid yet · Cancel twice = abort,
    the job stays booked and nothing changes. */
@@ -2048,6 +2170,7 @@ function uncompleteJob(id){
   const had=+j.collected||0;
   j.status="scheduled";j.completedAt=0;j.collected=0;j.payMethod="";
   j.cleanerId=null;j.cleanerPct=0; // an accidental Done never leaves cleaning pay behind
+  if(bonusKey(j))applyDailyBonus(db,new Set([bonusKey(j)])); // un-collected here — the day may drop under the bar
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Back to scheduled — Done undone"+(had?" (had $"+had.toFixed(2)+" collected, now cleared)":"")});}
   save();return j;
@@ -2056,8 +2179,8 @@ function uncompleteJob(id){
 /* --- rendering --- */
 function schedHeader(){
   const d=new Date(schedDay+"T12:00:00"); // noon guard — no UTC rollover
-  const dow=d.toLocaleDateString(undefined,{weekday:"long"});
-  const date=d.toLocaleDateString(undefined,{month:"long",day:"numeric"});
+  const dow=d.toLocaleDateString("en-US",{weekday:"long"});
+  const date=d.toLocaleDateString("en-US",{month:"long",day:"numeric"});
   const rev=dayRev(schedDay);
   const step=schedView==="week"?7:1;
   return '<div class="tl-head">'+
@@ -2159,7 +2282,7 @@ function renderWeek(){
   const cols=weekDates(schedAnchor||schedDay).map(d=>{
     const dt=new Date(d+"T12:00:00"), jobs=groupSlotJobs(dayJobs(d));
     return '<div class="week-col'+(d===t?" today":"")+(d===schedDay?" sel":"")+'" data-wcol="'+d+'">'+
-      '<div class="week-col-head">'+esc(dt.toLocaleDateString(undefined,{weekday:"short"}))+'<br>'+dt.getDate()+'</div>'+
+      '<div class="week-col-head">'+esc(dt.toLocaleDateString("en-US",{weekday:"short"}))+'<br>'+dt.getDate()+'</div>'+
       '<div class="week-col-body">'+(jobs.length?jobs.map(weekGroupCard).join(""):'<div class="week-empty">—</div>')+'</div>'+
     '</div>';
   }).join("");
@@ -2196,12 +2319,15 @@ function renderSchedule(){
     el.onclick=e=>{if(e.target.closest("[data-jobcard]"))return;schedDay=el.dataset.wcol;renderSchedule();};
   });
   const ea=$("#empty-add-sched");if(ea)ea.onclick=()=>openJob(null,{date:schedDay});
+  pregeocode(schedView==="week"?weekDates(schedAnchor||schedDay).flatMap(d=>dayJobs(d)):dayJobs(schedDay));
 }
 
 /* --- job modal --- */
 function jobForm(j,preset){
   preset=preset||{};
-  const svcOpts=db.settings.services.map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'"'+
+  const svcList=db.settings.services.slice(); // "Snow Clearing" etc. aren't in the list — keep the job's own service
+  if(j&&j.service&&!svcList.some(x=>x.name===j.service))svcList.push({name:j.service,price:+j.price||0});
+  const svcOpts=svcList.map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'"'+
     (j?j.service===s.name?" selected":"":"")+'>'+esc(s.name)+'</option>').join("");
   const firstSvc=db.settings.services[0];
   const date=j?j.date:(preset.date||schedDay);
@@ -2484,7 +2610,7 @@ function openJob(id,preset){
   // The ✎ chip opens the full client editor right from the job (cust-overlay gets a temporary
   // z-index bump so it stacks ABOVE this modal; closeModal resets it).
   // Address line under the name: tap → Waze opens and starts navigating there (best route).
-  const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
+  const addr=c&&(c.street||"").trim()?addrLine(c):"";
   $("#job-hsub").innerHTML=esc((c?c.name:"")+(isSlot?" · "+money2(siblings.reduce((s,x)=>s+(+x.price||0),0))+" · "+siblings.length+" services":""))+
     (c&&c.phone?' <a class="btn sm" style="margin-left:8px;text-decoration:none" href="tel:'+esc(smsNum(c.phone))+'">📞 Call</a>'+
       ' <a class="btn sm" style="margin-left:8px;text-decoration:none" href="sms:'+esc(smsNum(c.phone))+'">💬 Text</a>':"")+
@@ -2493,8 +2619,8 @@ function openJob(id,preset){
       ' <button class="btn sm" id="jf-confirm" style="margin-left:8px">✓ Confirmed</button>':
       ' <button class="btn sm" id="jf-confirm" style="margin-left:8px">📋 Confirm</button>'+
       ' <button class="btn sm" id="jf-markconfirm" style="margin-left:8px">✓ Mark confirmed</button>'):"")+
-    (addr?'<div style="margin-top:5px"><a href="https://waze.com/ul?q='+encodeURIComponent(addr)+'&navigate=yes" target="_blank" rel="noopener" '+
-      'style="color:var(--brand);font-weight:600;text-decoration:none">📍 '+esc(addr)+'</a></div>':"");
+    (addr?'<div style="margin-top:5px"><a id="job-waze" data-cid="'+c.id+'" href="'+esc(wazeHref(c))+'" target="_blank" rel="noopener" '+
+      'style="color:var(--brand);font-weight:600;text-decoration:none">📍 '+esc(wazeLabel(c))+'</a></div>':"");
   const ecBtn=$("#jf-editcust");
   if(ecBtn)ecBtn.onclick=()=>{
     const ov=$("#cust-overlay");if(ov&&ov.style)ov.style.zIndex="65";
@@ -2579,6 +2705,7 @@ function openJob(id,preset){
     openJob(editJob);toast("Marked confirmed","ok");
   };
   openModal("job-overlay");
+  if(addr)geocodeCust(c).then(ch=>{if(ch)paintWazeLink(c.id);}); // exact house pin lands in place
 }
 // ONE delegated listener for every autosaving field, rather than wiring each one — fires on
 // blur/change, so an existing job's edits persist without a Save button. New jobs (editJob
@@ -3127,7 +3254,9 @@ function renderPlans(){
 
 /* --- builder --- */
 function planSvcOpts(selected){
-  return db.settings.services.map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'"'+
+  const list=db.settings.services.slice();
+  if(selected&&!list.some(x=>x.name===selected))list.push({name:selected,price:0}); // a plan's own service stays selected
+  return list.map(s=>'<option value="'+esc(s.name)+'" data-price="'+(+s.price||0)+'"'+
     (selected===s.name?" selected":"")+'>'+esc(s.name)+'</option>').join("");
 }
 function paintPlanMonths(){
@@ -3378,9 +3507,9 @@ function sendConfirmLink(id){
   const sibs=slotSiblings(j);
   const services=sibs.map(x=>x.service).join(" + ");
   const total=sibs.reduce((s,x)=>s+(+x.price||0),0);
-  const when=new Date(j.date+"T12:00:00").toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"})+
+  const when=new Date(j.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})+
     (j.time?" at "+fmtTime(j.time):"");
-  const addr=c?[c.street,c.city].filter(Boolean).join(", "):"";
+  const addr=c&&(c.street||"").trim()?addrLine(c):"";
   const body="Hi "+(c?firstName(c.name):"")+", please confirm your "+services+" on "+when+
     (addr?" — "+addr:"")+", "+money(total)+". Confirm here: "+link;
   if(ph)location.href="sms:"+smsNum(ph)+"?&body="+encodeURIComponent(body);
@@ -3451,7 +3580,7 @@ function textBookingConfirmation(id){
   const body="Hi "+firstName(c.name)+" — confirming your "+j.service+" on "+
     fmtDate(j.date,{weekday:"long",month:"long",day:"numeric"})+(j.time?" at "+fmtTime(j.time):"")+
     " for "+money2(j.price)+". Confirm here: "+link;
-  window.location.href="sms:"+smsNum(to)+"?body="+encodeURIComponent(body);
+  window.location.href="sms:"+smsNum(to)+"?&body="+encodeURIComponent(body);
   toast("Messages opened — press send there","ok");
 }
 function openBookingConfirm(id){
@@ -3588,7 +3717,7 @@ function sendMsg(id){
   const m=db.messages.find(x=>x.id===id);if(!m)return;
   const c=custById(m.customerId),to=cleanNum(c&&c.phone);
   if(!to){toast("No phone number on file for this customer","err");return;}
-  window.location.href="sms:"+smsNum(to)+"?body="+encodeURIComponent(m.body);
+  window.location.href="sms:"+smsNum(to)+"?&body="+encodeURIComponent(m.body);
   markHandedOff(id);render();
   toast("Messages opened — press send there","ok");
 }
@@ -3650,14 +3779,6 @@ function renderMessages(){
   document.querySelectorAll("[data-mtpl]").forEach(el=>el.onchange=()=>{
     const t2=db.settings.templates[+el.dataset.mtpl];if(!t2)return;
     t2.body=el.value;save();toast("Template saved","ok");});
-  $("#au-every").onchange=e=>{
-    db.settings.automation.followupEveryDays=Math.max(1,+e.target.value||3);save();toast("Saved","ok");};
-  $("#au-max").onchange=e=>{
-    db.settings.automation.followupMaxTries=Math.max(0,+e.target.value||0);save();toast("Saved","ok");};
-  $("#au-review").onchange=e=>{
-    db.settings.automation.reviewAskAfterDone=!!e.target.checked;save();toast("Saved","ok");};
-  $("#au-link").onchange=e=>{
-    db.settings.automation.reviewLink=(e.target.value||"").trim();save();toast("Saved","ok");};
 }
 /* ---------------- Text blast ----------------
    Handoff tool only, same rule as everything else in Messages: no db writes, no message records.
@@ -4247,7 +4368,7 @@ function planRevenueByMonth(n){
     const ym=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");
     const total=db.jobs.filter(j=>j.status!=="cancelled"&&j.planId!=null&&(j.date||"").slice(0,7)===ym)
       .reduce((s,j)=>s+(+j.collected||0),0);
-    out.push({label:dt.toLocaleDateString(undefined,{month:"short"}),year:dt.getFullYear(),total});}
+    out.push({label:dt.toLocaleDateString("en-US",{month:"short"}),year:dt.getFullYear(),total});}
   return out;
 }
 function recurringRevenueSeries(){let run=0;return planRevenueByMonth(12).map(m=>({label:m.label,year:m.year,value:(run+=m.total)}));}
