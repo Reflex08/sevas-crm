@@ -3364,7 +3364,8 @@ function planLink(id){
   if(!bizPhone){toast("Add your business phone in Settings first","err");return null;}
   const c=custById(p.customerId);
   const payload={b:biz.name||"",ph:bizPhone,n:firstName(c?c.name:""),pn:p.name||"",sv:p.service||"",
-    pv:+p.perVisit||0,vy:+p.visitsPerYear||0,ip:+p.initialPrice||0};
+    pv:+p.perVisit||0,vy:+p.visitsPerYear||0,ip:+p.initialPrice||0,
+    pid:p.id,c:p.customerId}; // ids → plan.html reports the accept to the relay, the CRM activates the plan itself
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
     .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   return "https://reflex08.github.io/sevas-crm/plan.html?d="+b64;
@@ -3373,7 +3374,8 @@ function sendPlanLink(id){
   const link=planLink(id);if(!link)return;
   const p=db.plans.find(x=>x.id===id),c=p?custById(p.customerId):null;
   const ph=c?cleanNum(c.phone):"";
-  const body="Hi "+(c?firstName(c.name):"")+", here's your "+(p?p.name:"service")+" plan with "+
+  const pn=((p&&p.name)||"service").replace(/\s+plan$/i,""); // "Window Cleaning plan" → never "…plan plan"
+  const body="Hi "+(c?firstName(c.name):"")+", here's your "+pn+" plan with "+
     ((db.settings.business||{}).name||"us")+" — review and accept here: "+link;
   if(ph)location.href="sms:"+smsNum(ph)+"?&body="+encodeURIComponent(body);
   else prompt("No phone on file for "+(c?c.name:"this client")+" — copy the link:",link);
@@ -3383,8 +3385,9 @@ function planFoot(p){
     return '<button class="btn btn-primary" id="pv-sendlink" style="width:100%;justify-content:center;padding:14px;font-size:15px">📩 Send accept link</button>'+
       '<button class="btn btn-ghost" id="pv-accept" style="width:100%;justify-content:center;margin-top:10px">Accept &amp; Sign in person</button>';
   if(p.status==="active"){
-    const sig=p.signature?'<div style="text-align:center;width:100%">'+
-      '<img src="'+esc(p.signature)+'" alt="signature" style="max-height:90px;max-width:100%">'+
+    const sig=(p.signature||p.signedName)?'<div style="text-align:center;width:100%">'+
+      (p.signature?'<img src="'+esc(p.signature)+'" alt="signature" style="max-height:90px;max-width:100%">'
+        :'<div style="font-style:italic;font-size:20px">'+esc(p.signedName)+'</div><div class="sub">signed online</div>')+
       '<div class="sub" style="margin-top:6px">Signed '+esc(fmtDateShort(localISO(new Date(p.signedAt||Date.now()))))+'</div>'+
       (p.cardOnFile?'<div class="sub" style="color:var(--green);margin-top:4px">Card on file ✓ (simulated)</div>':'')+
       '</div>':'';
@@ -3443,6 +3446,9 @@ function planSignPad(id){
         '<button class="btn btn-primary" id="sig-save" style="flex:1;justify-content:center">Save signature</button>'+
       '</div></div>';
   const cv=$("#sig-pad"),ctx=cv.getContext("2d"),dpr=window.devicePixelRatio||1;
+  // it renders at the bottom of a tall sheet — on a phone it sat below the fold and the button
+  // looked dead (2026-09-17). Bring it on screen.
+  if(cv.scrollIntoView)cv.scrollIntoView({block:"center",behavior:"smooth"});
   cv.width=cv.offsetWidth*dpr;cv.height=cv.offsetHeight*dpr;ctx.scale(dpr,dpr);
   ctx.strokeStyle="#fff";ctx.lineWidth=2.5;ctx.lineCap="round";ctx.lineJoin="round";
   let down=false,drew=false;
@@ -4905,6 +4911,34 @@ async function syncFetchRemote(id){
 // knows nothing but job numbers; the CRM only trusts ids that exist and are still unconfirmed.
 const CONFIRM_RELAY="https://sevas-confirm-relay.confirm-relay.workers.dev";
 const CONFIRM_RELAY_KEY="sv-9f2d71c4e8a35b06",CONFIRM_SEEN="flyra.confirmseen";
+/* PURE on db (network wrapper = pullConfirmations). A job id is trusted only if it exists and is
+   still unconfirmed; a plan id only if it's still PROPOSED and belongs to the customer the link was
+   made for — a relay record can never activate someone else's plan. */
+function applyConfirmRecord(rec,names,planNames){
+  let n=0;
+  (rec.jobIds||[]).forEach(id=>{
+    const j=db.jobs.find(x=>x.id===id);
+    if(j&&!j.termsAcceptedAt){
+      j.termsAcceptedAt=rec.t||Date.now();
+      const c=custById(j.customerId);
+      if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"📋 Booking confirmed by the client (via link)"});
+        if(!names.includes(c.name))names.push(c.name);}
+      n++;
+    }
+  });
+  if(rec.planId){
+    const p=db.plans.find(x=>x.id===+rec.planId);
+    if(p&&p.status==="proposed"&&p.customerId===+rec.cid){
+      p.status="active";p.signedAt=+rec.t||Date.now();p.signedName=String(rec.signed||rec.name||"").slice(0,80);
+      p.cardOnFile=false;
+      const c=custById(p.customerId);
+      if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"✍ Accepted "+p.name+" online"+(p.signedName?" — signed "+p.signedName:"")});
+        if(!planNames.includes(c.name))planNames.push(c.name);}
+      n++;
+    }
+  }
+  return n;
+}
 async function pullConfirmations(){
   try{
     const since=+localStorage.getItem(CONFIRM_SEEN)||0;
@@ -4912,21 +4946,16 @@ async function pullConfirmations(){
     if(!res.ok)return;
     const list=await res.json();
     if(!Array.isArray(list)||!list.length)return;
-    let stamped=0,names=[];
+    let stamped=0;const names=[],planNames=[];
     list.forEach(rec=>{
-      (rec.jobIds||[]).forEach(id=>{
-        const j=db.jobs.find(x=>x.id===id);
-        if(j&&!j.termsAcceptedAt){
-          j.termsAcceptedAt=rec.t||Date.now();
-          const c=custById(j.customerId);
-          if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"📋 Booking confirmed by the client (via link)"});
-            if(!names.includes(c.name))names.push(c.name);}
-          stamped++;
-        }
-      });
+      stamped+=applyConfirmRecord(rec,names,planNames);
       if((+rec.t||0)>+((localStorage.getItem(CONFIRM_SEEN))||0))localStorage.setItem(CONFIRM_SEEN,String(rec.t));
     });
-    if(stamped){save();render();toast((names.join(", ")||"A client")+" confirmed the booking ✓","ok");}
+    if(stamped){
+      save();ensurePlanJobs();render();
+      toast([names.length?names.join(", ")+" confirmed the booking ✓":"",
+        planNames.length?planNames.join(", ")+" accepted their plan ✓":""].filter(Boolean).join(" · ")||"Client confirmed ✓","ok");
+    }
   }catch(e){} // relay down = nothing happens; the manual ✓ chip still works
 }
 /* Facebook Lead Ads (owner 2026-08-26: "sends leads to my phone the second someone submits a

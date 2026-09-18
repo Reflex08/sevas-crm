@@ -96,7 +96,8 @@ function parseData(){
   if(!d.n||!isFinite(+d.pv)||!isFinite(+d.vy))return null; // business name/phone self-repair below
   return {b:realBiz(d.b),ph:realPhone(d.ph),n:String(d.n),
     pn:d.pn?String(d.pn):"Service plan",sv:d.sv?String(d.sv):"",
-    pv:+d.pv,vy:+d.vy,ip:isFinite(+d.ip)?+d.ip:0};
+    pv:+d.pv,vy:+d.vy,ip:isFinite(+d.ip)?+d.ip:0,
+    pid:isFinite(+d.pid)?+d.pid:0,c:isFinite(+d.c)?+d.c:0};
 }
 function render(){
   var d=parseData();
@@ -140,6 +141,15 @@ function render(){
         '<div class="headline">Plan accepted &mdash; welcome aboard!</div>'+
         '<div class="note">A confirmation text is opening &mdash; please press send, it&#39;s your receipt.</div>'+
       '</div>';
+    // Tell the CRM directly — it polls the relay every minute and activates the plan by itself
+    // (links sent before 2026-09-17 carry no plan id: those still arrive as the text + email only).
+    if(d.pid&&d.c){
+      try{
+        fetch("https://sevas-confirm-relay.confirm-relay.workers.dev/confirm",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({planId:d.pid,cid:d.c,name:d.n,signed:signed})}).catch(function(){});
+      }catch(e){}
+    }
     // Automatic written proof to the business inbox (fire-and-forget; SMS receipt is the backup).
     try{
       fetch("https://formsubmit.co/ajax/info@sevasservices.com",{method:"POST",
