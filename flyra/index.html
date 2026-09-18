@@ -4947,7 +4947,19 @@ async function syncFetchRemote(id){
 // stamps termsAcceptedAt on the matching jobs — the green ✓ lands with no owner action. The relay
 // knows nothing but job numbers; the CRM only trusts ids that exist and are still unconfirmed.
 const CONFIRM_RELAY="https://sevas-confirm-relay.confirm-relay.workers.dev";
-const CONFIRM_RELAY_KEY="sv-9f2d71c4e8a35b06",CONFIRM_SEEN="flyra.confirmseen";
+// v2 (2026-09-17): v1 moved its high-water mark past records whose job this device didn't have
+// YET (booked on a rep's phone that hadn't synced) — Josh confirmed 3 times, never landed. The new
+// key makes every device re-read the relay's 30 days once; unresolved records now wait in PENDING.
+const CONFIRM_RELAY_KEY="sv-9f2d71c4e8a35b06",CONFIRM_SEEN="flyra.confirmseen2",CONFIRM_PENDING="flyra.confirmpending";
+/* A record is settled once every id it names exists here (or was deleted here) — until then it is
+   kept and retried each tick, up to the relay's own 30-day life. */
+function confirmResolved(rec){
+  // deleted AFTER the client confirmed — an older tombstone is a reused id, not this booking
+  const gone=(coll,id)=>((db.deleted||{})[coll]||[]).some(t=>t.id===id&&(+t.t||0)>=(+rec.t||0));
+  const jobsOk=(rec.jobIds||[]).every(id=>db.jobs.some(j=>j.id===id)||gone("jobs",id));
+  const planOk=!rec.planId||db.plans.some(p=>p.id===+rec.planId)||gone("plans",+rec.planId);
+  return jobsOk&&planOk;
+}
 /* PURE on db (network wrapper = pullConfirmations). A job id is trusted only if it exists and is
    still unconfirmed; a plan id only if it's still PROPOSED and belongs to the customer the link was
    made for — a relay record can never activate someone else's plan. */
@@ -4981,13 +4993,17 @@ async function pullConfirmations(){
     const since=+localStorage.getItem(CONFIRM_SEEN)||0;
     const res=await fetch(CONFIRM_RELAY+"/confirms?since="+since+"&k="+CONFIRM_RELAY_KEY);
     if(!res.ok)return;
-    const list=await res.json();
-    if(!Array.isArray(list)||!list.length)return;
-    let stamped=0;const names=[],planNames=[];
+    const fresh=await res.json();
+    let pending=[];try{pending=JSON.parse(localStorage.getItem(CONFIRM_PENDING))||[];}catch(e){}
+    const list=pending.concat(Array.isArray(fresh)?fresh:[]);
+    if(!list.length)return;
+    let stamped=0;const names=[],planNames=[],still=[],cut=Date.now()-30*86400000;
     list.forEach(rec=>{
       stamped+=applyConfirmRecord(rec,names,planNames);
+      if(!confirmResolved(rec)&&(+rec.t||0)>cut)still.push(rec); // its job hasn't reached this device yet
       if((+rec.t||0)>+((localStorage.getItem(CONFIRM_SEEN))||0))localStorage.setItem(CONFIRM_SEEN,String(rec.t));
     });
+    localStorage.setItem(CONFIRM_PENDING,JSON.stringify(still.filter((r,i,a)=>a.findIndex(x=>x.t===r.t&&x.name===r.name)===i).slice(-200)));
     if(stamped){
       save();ensurePlanJobs();render();
       toast([names.length?names.join(", ")+" confirmed the booking ✓":"",
