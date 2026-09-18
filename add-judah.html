@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Add Judah (technician)</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px;max-width:640px;margin:0 auto}
+pre{background:#15161c;padding:14px;border-radius:10px;white-space:pre-wrap}</style></head><body>
+<h2>Add Judah as a technician</h2>
+<pre id="log"></pre>
+<script>
+"use strict";
+/* One-time: adds ONE user record to the cloud copy. Every device merges it in on its next sync
+   tick (records are unioned by id), so no open CRM tab can drop it. Nothing else is touched. */
+const FILE="flyra-db.json";
+const log=m=>{const el=document.getElementById("log");el.textContent=el.textContent+m+String.fromCharCode(10);};
+(async function(){
+try{
+  const tok=localStorage.getItem("flyra.synckey");
+  if(!tok){log("No sync token in this browser profile — open this page in the Chrome profile that runs the CRM.");return;}
+  const H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+  let gid=localStorage.getItem("flyra.syncgist");
+  if(!gid){const list=await (await fetch("https://api.github.com/gists?per_page=100",{headers:H})).json();
+    const hit=(Array.isArray(list)?list:[]).find(g=>g.files&&g.files[FILE]);gid=hit&&hit.id;}
+  if(!gid){log("Couldn't find the CRM's cloud copy — aborting, nothing changed.");return;}
+  const g=await (await fetch("https://api.github.com/gists/"+gid,{headers:H})).json();
+  const f=g.files[FILE];
+  const db=JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+  const have=(db.users||[]).find(u=>/^judah\b/i.test(String(u.name||"").trim()));
+  if(have){log("Judah is already on the team (#"+have.id+", "+have.role+(have.active===false?", inactive":"")+") — nothing to do.");return;}
+  const now=Date.now();
+  const id=Math.max(0,...db.users.map(u=>+u.id||0),(+db.seqU||0)-1)+1;
+  db.users.push({id,name:"Judah",role:"tech",commissionPct:0,color:"#f97316",active:true,createdAt:now,up:now});
+  db.seqU=id+1;db.updatedAt=now;
+  const res=await fetch("https://api.github.com/gists/"+gid,{method:"PATCH",headers:H,
+    body:JSON.stringify({files:{[FILE]:{content:JSON.stringify(db)}}})});
+  log(res.ok?"Pushed to cloud OK":"Cloud push FAILED ("+res.status+")");
+  if(res.ok){
+    log("Added Judah — technician (#"+id+"), start day today.");
+    log("Commission: not set yet → CRM ▸ Settings ▸ Crew commission. Any cleans he does before you set it take his first rate.");
+    log("On Judah's phone: open the CRM, tap his name.");
+  }
+}catch(e){log("ERROR: "+e.message);}
+})();
+</script></body></html>

@@ -108,12 +108,13 @@
   .who-card .nm{font-weight:800;font-size:14px}
   .who-pin{margin-top:20px;max-width:260px}
   .who-shake{animation:whoshake .32s}
+  .me-sw{width:30px;height:30px;border-radius:50%;border:3px solid transparent;cursor:pointer;padding:0}
+  .me-sw.on{border-color:#fff}
   @keyframes whoshake{0%,100%{transform:translateX(0)}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
   /* Rep mode: the office screens leave the drawer entirely. */
   body.rep .nav a[data-view="customers"],
   body.rep .nav a[data-view="plans"],body.rep .nav a[data-view="messages"],
-  body.rep .nav a[data-view="team"],body.rep .nav a[data-view="reports"],
-  body.rep .nav a[data-view="settings"]{display:none}
+  body.rep .nav a[data-view="team"],body.rep .nav a[data-view="reports"]{display:none}
   /* the Map is a SALES-REP tool (owner order 2026-08-20): hidden by default, shown for reps,
      hidden again for techs — rule order matters, a tech's body carries .rep AND .tech */
   .nav a[data-view="map"]{display:none}
@@ -1305,10 +1306,21 @@ function jobPaid(j){return j.status==="done"&&(+j.collected||0)>=(+j.price||0);}
    (Mon 2026-08-17 4pm), stamped the moment the job goes Done. */
 function activeTech(users){return (users||db.users||[]).find(u=>u.role==="tech"&&/fiyin/i.test(u.name||"")&&u.active!==false);}
 function afterHire(j){const dt=j.date||"";return dt>"2026-08-17"||(dt==="2026-08-17"&&(j.time||"")>="16:00");}
-function stampCleaner(j,users){
-  if(j.cleanerId||j.status!=="done"||!afterHire(j))return;
-  const fy=activeTech(users);
-  if(fy){j.cleanerId=fy.id;j.cleanerPct=+fy.commissionPct||20;} // rate as of completion — later rate changes don't rewrite history
+/* Who cleaned it (2026-09-17, owner: "add Judah as a technician" — pay used to be wired to Fiyin
+   by NAME): the technician whose phone pressed Done; when the office or a rep presses it, the ONLY
+   active technician. Two+ active techs and not a tech's phone → nobody is guessed. A tech earns on
+   visits dated from his start day (Fiyin keeps his original Mon 2026-08-17 4pm rule). */
+function cleanerFor(j,users,presserId){
+  const techs=(users||[]).filter(u=>u.role==="tech"&&u.active!==false);
+  const t=techs.find(u=>u.id===presserId)||(techs.length===1?techs[0]:null);
+  if(!t)return null;
+  const started=/fiyin/i.test(t.name||"")?afterHire(j):!(+t.createdAt)||(j.date||"")>=localISO(new Date(+t.createdAt));
+  return started?t:null;
+}
+function stampCleaner(j,users,presserId){
+  if(j.cleanerId||j.status!=="done")return;
+  const t=cleanerFor(j,users,presserId);
+  if(t){j.cleanerId=t.id;j.cleanerPct=+t.commissionPct||0;} // rate as of completion — later rate changes don't rewrite history
 }
 /* Top Salespeople — done jobs in a period, credited per job via jobCredits (splits, or the single
    stamped closer). `key` is a payPeriodKey() string ("YYYY-MM" or "YYYY"); omitted = this month. */
@@ -1378,12 +1390,12 @@ function activityFeed(){
    `who` is the person holding THIS phone. It lives in uiPref (localStorage), never in db —
    the db syncs between devices, the person at each device does not. A stale or deactivated id
    resolves to null, which puts the picker back up. */
-const REP_VIEWS=["dashboard","map","schedule","leads"]; // everything else is office work
+const REP_VIEWS=["dashboard","map","schedule","leads","settings"]; // settings = their OWN profile only (renderSettings)
 function whoUser(){const u=userById(uiPref().who);return (u&&u.active!==false)?u:null;}
 function isRep(){const u=whoUser();return !!u&&(u.role==="sales"||u.role==="tech");}
 function visibleViews(){ // a technician works his day — no leads, no sales screens
   const u=whoUser();
-  if(u&&u.role==="tech")return["dashboard","schedule"];
+  if(u&&u.role==="tech")return["dashboard","schedule","settings"];
   if(isRep())return REP_VIEWS.slice();
   return Object.keys(VIEWS).filter(v=>v!=="map"); // map = field-crew tool; owner asked it off his own menu
 }
@@ -1406,8 +1418,8 @@ function switchUser(){uiSet({who:null});drawer(false);render();}
 function whoCard(u){
   const rm=ROLE_META[u.role]||ROLE_META.tech;
   return '<div class="who-card" data-who="'+u.id+'">'+
-    '<div class="avatar" style="background:'+esc(u.color||avatarColor(u.name))+'">'+esc(initials(u.name))+'</div>'+
-    '<div class="nm">'+esc(u.name)+'</div>'+
+    '<div class="avatar" style="background:'+esc(u.color||avatarColor(u.name))+'">'+esc(initials(dispName(u)))+'</div>'+
+    '<div class="nm">'+esc(dispName(u))+'</div>'+
     '<span class="badge b-'+rm.cls+'">'+esc(rm.label)+'</span>'+
   '</div>';
 }
@@ -1443,7 +1455,7 @@ function promptWhoPin(u){
 }
 function paintWhoFoot(){
   const el=$("#who-name");if(!el)return;
-  el.textContent=(whoUser()||{}).name||"";
+  el.textContent=dispName(whoUser());
 }
 
 /* ---------------- Router ---------------- */
@@ -1485,7 +1497,7 @@ function greetWord(h){return h<12?"Good morning":h<18?"Good afternoon":"Good eve
    renderDashboard and renderRepHome so the two screens can never drift apart. */
 function heroFirstName(){
   const me=whoUser();
-  if(me&&me.name)return firstName(me.name);
+  if(me&&me.name)return String(me.nick||"").trim()||firstName(me.name);
   return firstName(db.settings.business&&db.settings.business.name||"").replace(/['’]s$/i,"")||"Seva";
 }
 function heroGreetHTML(){
@@ -1553,8 +1565,8 @@ function leaderboardPanel(){
     (rows.length?rows.map((r,i)=>
       '<div class="lb-row">'+
         '<div class="lb-rank">'+(i+1)+'</div>'+
-        '<div class="avatar" style="background:'+(r.user.color||avatarColor(r.user.name))+'">'+esc(initials(r.user.name))+'</div>'+
-        '<div><div class="nm">'+esc(r.user.name)+'</div>'+
+        '<div class="avatar" style="background:'+(r.user.color||avatarColor(r.user.name))+'">'+esc(initials(dispName(r.user)))+'</div>'+
+        '<div><div class="nm">'+esc(dispName(r.user))+'</div>'+
           '<div class="sub">'+r.count+' job'+(r.count!==1?"s":"")+' sold · '+
             (bySales?esc(money2(r.comm)):esc(money(r.sales)))+'</div></div>'+
         '<div class="lb-comm">'+esc(money2(bySales?r.sales:r.comm))+'</div>'+
@@ -1679,8 +1691,8 @@ function repLeaderPanel(me){
   const html=rows.map((r,n)=>
     '<div class="lb-row'+(n===mine?" me":"")+'">'+
       '<div class="lb-rank">'+(n===0?"👑":(n+1))+'</div>'+
-      '<div class="avatar" style="background:'+esc(r.user.color||avatarColor(r.user.name))+'">'+esc(initials(r.user.name))+'</div>'+
-      '<div><div class="nm">'+esc(r.user.name)+'</div>'+
+      '<div class="avatar" style="background:'+esc(r.user.color||avatarColor(r.user.name))+'">'+esc(initials(dispName(r.user)))+'</div>'+
+      '<div><div class="nm">'+esc(dispName(r.user))+'</div>'+
         '<div class="sub">'+r.count+' job'+(r.count!==1?"s":"")+' sold · '+esc(money(r.sales))+'</div></div>'+
       '<div class="lb-comm">'+esc(money2(val(r)))+'</div>'+
     '</div>');
@@ -1688,9 +1700,9 @@ function repLeaderPanel(me){
   const span=repPeriod==="year"?"this year":"this month";
   if(mine<0)html.push('<div class="rep-delta">Nothing credited to you '+span+' yet.</div>');
   else if(mine>0)html.splice(mine+1,0,'<div class="rep-delta">'+
-    esc(money2(val(rows[mine-1])-val(rows[mine])))+' behind '+esc(rows[mine-1].user.name)+'</div>');
+    esc(money2(val(rows[mine-1])-val(rows[mine])))+' behind '+esc(dispName(rows[mine-1].user))+'</div>');
   else if(rows.length>1)html.splice(1,0,'<div class="rep-delta">'+
-    esc(money2(val(rows[0])-val(rows[1])))+' ahead of '+esc(rows[1].user.name)+'</div>');
+    esc(money2(val(rows[0])-val(rows[1])))+' ahead of '+esc(dispName(rows[1].user))+'</div>');
   return '<div class="panel"><h2>You vs the crew<span class="spacer"></span>'+
       repSel("rep-metric",[["sales","Sales"],["commission","Commission"]],repMetric)+
       repSel("rep-period",[["month","Month"],["year","Year"]],repPeriod)+'</h2>'+
@@ -2295,7 +2307,7 @@ function completeJobFlow(id){
   if(!paid&&price>0&&!confirm("Mark it done but NOT paid yet?"))return null; // backed out — stays booked
   j.status="done";if(!j.completedAt)j.completedAt=Date.now();
   j.collected=paid?price:0;
-  stampCleaner(j,db.users); // pressing Done is what earns the tech his cleaning commission
+  stampCleaner(j,db.users,(whoUser()||{}).id); // pressing Done is what earns the tech his cleaning commission
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+j.service+" — "+(paid?"collected "+money(price):"unpaid")});}
   save();
@@ -2947,7 +2959,7 @@ function completeSlot(customerId,date,time){
   const total=jobs.reduce((s,j)=>s+(+j.price||0),0);
   const paid=total>0&&confirm("Collected "+money(total)+" for "+jobs.map(j=>j.service).join(" + ")+"?");
   if(!paid&&total>0&&!confirm("Mark it done but NOT paid yet?"))return null; // backed out — stays booked
-  jobs.forEach(j=>{j.status="done";if(!j.completedAt)j.completedAt=Date.now();j.collected=paid?(+j.price||0):0;stampCleaner(j,db.users);});
+  jobs.forEach(j=>{j.status="done";if(!j.completedAt)j.completedAt=Date.now();j.collected=paid?(+j.price||0):0;stampCleaner(j,db.users,(whoUser()||{}).id);});
   const c=custById(customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Completed "+jobs.map(j=>j.service).join(" + ")+" — "+(paid?"collected "+money(total):"unpaid")});}
   save();
@@ -4073,10 +4085,22 @@ const PAY_PERIODS=[["week","This week"],["lastweek","Last week"],["month","This 
 /* --- user data ops --- */
 function createUser(data){
   const u=Object.assign({id:db.seqU++,name:"",role:"tech",commissionPct:0,
-    color:avatarColor((data&&data.name)||""),active:true},data);
+    color:avatarColor((data&&data.name)||""),active:true,createdAt:Date.now()},data); // createdAt = start day (tech pay)
   db.users.push(u);save();return u;
 }
-function updateUser(id,data){const u=userById(id);if(!u)return null;Object.assign(u,data);save();return u;}
+function updateUser(id,data){
+  const u=userById(id);if(!u)return null;
+  const was=+u.commissionPct||0;
+  Object.assign(u,data);
+  // "set his commission at any given time" (owner 2026-09-17): cleans done while a tech's rate was
+  // still unset (0) take the first real rate — never "he cleaned those for free". Paid-out jobs and
+  // anything done at a real rate keep the rate they were done at.
+  const now=+u.commissionPct||0;
+  if(u.role==="tech"&&!was&&now)db.jobs.forEach(j=>{
+    if(j.cleanerId===u.id&&!(+j.cleanerPct)&&!(j.settledBy&&j.settledBy[u.id]))j.cleanerPct=now;});
+  save();return u;
+}
+function dispName(u){return u?(String(u.nick||"").trim()||u.name||""):"";} // nickname if they set one
 function toggleUserActive(id){const u=userById(id);if(!u)return null;u.active=u.active===false?true:false;save();return u;}
 
 /* --- equipment data ops --- */
@@ -4956,9 +4980,45 @@ function aboutCard(){
   return '<div class="panel"><h2>About</h2><div class="panel-pad"><div class="note">'+
     'Flyra-style rebuild · local · your data stays on this device</div></div></div>';
 }
+/* Everyone's own corner (owner 2026-09-17): colour, nickname, the sync token for THIS phone. */
+const ME_COLORS=["#56b8f5","#34d399","#a78bfa","#fbbf24","#fb7185","#f472b6","#5ac8fa","#a3e635","#f97316","#e5e7eb"];
+function meCard(){
+  const me=whoUser();if(!me)return"";
+  const col=/^#[0-9a-f]{6}$/i.test(me.color||"")?me.color:avatarColor(me.name);
+  return '<div class="panel"><h2>My profile</h2><div class="panel-pad">'+
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
+      '<div class="avatar" style="background:'+esc(col)+'">'+esc(initials(dispName(me)))+'</div>'+
+      '<div><div class="nm">'+esc(dispName(me))+'</div><div class="sub">'+esc(me.name)+' · '+esc((ROLE_META[me.role]||ROLE_META.tech).label)+'</div></div></div>'+
+    '<div class="field"><label>Nickname — what the app calls you</label>'+
+      '<input id="me-nick" maxlength="24" value="'+esc(me.nick||"")+'" placeholder="'+esc(firstName(me.name))+'"></div>'+
+    '<div class="field" style="margin-bottom:0"><label>Colour</label><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'+
+      ME_COLORS.map(c=>'<button type="button" class="me-sw'+(c.toLowerCase()===col.toLowerCase()?" on":"")+'" data-mecolor="'+c+'" style="background:'+c+'" aria-label="Colour '+c+'"></button>').join("")+
+      '<input id="me-color" type="color" value="'+esc(col)+'" title="Any colour" style="width:36px;height:30px;padding:0;border:0;background:none;cursor:pointer"></div></div>'+
+  '</div></div>';
+}
+/* Owner: every crew member's commission in one place — change it any time. */
+function crewPayCard(){
+  const crew=activeUsers().filter(u=>u.role==="sales"||u.role==="tech");
+  if(!crew.length)return"";
+  return '<div class="panel"><h2>Crew commission</h2><div class="panel-pad">'+
+    crew.map(u=>'<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)">'+
+      '<div class="avatar" style="background:'+esc(u.color||avatarColor(u.name))+'">'+esc(initials(u.name))+'</div>'+
+      '<div style="flex:1;min-width:0"><div class="nm">'+esc(u.name)+'</div><div class="sub">'+
+        (u.role==="tech"?"Technician — % of each job he cleans":"Sales — % of each job they close")+
+        (+u.commissionPct?'':' · <span style="color:var(--amber)">not set</span>')+'</div></div>'+
+      '<input type="number" min="0" max="100" step="1" data-crewpct="'+u.id+'" value="'+(+u.commissionPct||0)+'" style="width:72px">'+
+      '<span class="sub">%</span></div>').join("")+
+    '<div class="hint" style="margin-top:8px">Applies to work from now on — jobs already done keep the rate they were done at '+
+      '(a technician\'s jobs done before his rate was set pick up the first rate you give him).</div>'+
+  '</div></div>';
+}
 function renderSettings(){
+  if(isRep()){ // the crew's own settings — nothing about the business
+    shell("My settings","Just you, on this phone",meCard()+syncCard());
+    bindSettingsEvents();return;
+  }
   shell("Settings","Business, services, backup",
-    bizCard()+servicesCard()+goalCard()+termsCard()+referralCard()+pinCard()+dataCard()+syncCard()+integrationsCard()+aboutCard());
+    meCard()+bizCard()+crewPayCard()+servicesCard()+goalCard()+termsCard()+referralCard()+pinCard()+dataCard()+syncCard()+integrationsCard()+aboutCard());
   bindSettingsEvents();
 }
 function bindSettingsEvents(){
@@ -5007,6 +5067,16 @@ function bindSettingsEvents(){
     if(!confirm("Wipe every Flyra record on this device?"))return;
     if(!confirm("Last chance — this cannot be undone. The demo seed comes back."))return;
     localStorage.removeItem(DBKEY);window.location.reload();};
+  const me=whoUser();
+  const nk=$("#me-nick");if(nk&&me)nk.onchange=()=>{
+    updateUser(me.id,{nick:(nk.value||"").trim().slice(0,24)});paintWhoFoot();renderSettings();toast("Nickname saved","ok");};
+  const setCol=c=>{if(!me||!/^#[0-9a-f]{6}$/i.test(c||""))return;updateUser(me.id,{color:c});renderSettings();toast("Colour saved","ok");};
+  document.querySelectorAll("[data-mecolor]").forEach(b=>b.onclick=()=>setCol(b.dataset.mecolor));
+  const mc=$("#me-color");if(mc)mc.onchange=()=>setCol(mc.value);
+  document.querySelectorAll("[data-crewpct]").forEach(el=>el.onchange=()=>{
+    const u=userById(+el.dataset.crewpct);if(!u)return;
+    updateUser(u.id,{commissionPct:Math.max(0,Math.min(100,+el.value||0))});
+    renderSettings();toast(u.name+" → "+(+u.commissionPct)+"%","ok");});
   bindSyncCard();
 }
 
