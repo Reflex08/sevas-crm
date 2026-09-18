@@ -1096,6 +1096,43 @@ function normalize(r){
       for(const k of ["jobs","invoices","plans","pins","messages"])r[k]=r[k].filter(x=>!demo.has(x.customerId));
     }
   }}
+  // One client per person (2026-09-17): a phone holding a pre-sync copy of Kyrie's bookings merged
+  // them back in as NEW client records (Sybelle ×6, Justin ×3…), and bookings that looked lost got
+  // typed in again. Same name + same phone (10+ digits) + same house (number + street name, or one
+  // side blank) = one client — a landlord with two properties (same name/phone, other house) stays
+  // two. Keeper = most jobs, then oldest; jobs/messages/plans/pins/invoices follow it, the history
+  // merges, the copies are tombstoned so no device can bring them back. Deterministic on every device.
+  {const digits=p=>String(p||"").replace(/\D/g,"").replace(/^1(?=\d{10}$)/,"");
+   const house=c=>String(c.street||"").trim().toLowerCase().split(/[\s,]+/).slice(0,2).join(" ");
+   const groups=new Map();
+   r.customers.forEach(c=>{
+     const d=digits(c.phone);if(d.length<10)return;
+     const k=String(c.name||"").trim().toLowerCase().replace(/\s+/g," ")+"|"+d;
+     if(!groups.has(k))groups.set(k,[]);groups.get(k).push(c);
+   });
+   const into=new Map(); // copy id → keeper id
+   const jobsOf=id=>r.jobs.filter(j=>j.customerId===id).length;
+   groups.forEach(list=>{
+     if(list.length<2)return;
+     list.sort((a,b)=>jobsOf(b.id)-jobsOf(a.id)||(+a.createdAt||0)-(+b.createdAt||0)||a.id-b.id);
+     const keep=list[0];
+     list.slice(1).forEach(d=>{
+       const hk=house(keep),hd=house(d);
+       if(hk&&hd&&hk!==hd)return; // another property — a different client record on purpose
+       into.set(d.id,keep.id);
+       const seen=new Set((keep.log||[]).map(l=>l.t+"|"+l.m));
+       keep.log=(keep.log||[]).concat((d.log||[]).filter(l=>!seen.has(l.t+"|"+l.m))).sort((x,y)=>(+x.t||0)-(+y.t||0));
+       if(d.notes&&!String(keep.notes||"").includes(d.notes))keep.notes=[keep.notes,d.notes].filter(Boolean).join("\n");
+       if(d.stage==="won")keep.stage="won";
+       if(!keep.street&&d.street){keep.street=d.street;keep.city=d.city;}
+       r.deleted.customers.push({id:d.id,t:Date.now()});
+     });
+   });
+   if(into.size){
+     r.customers=r.customers.filter(c=>!into.has(c.id));
+     for(const k of ["jobs","invoices","plans","pins","messages"])
+       r[k].forEach(x=>{if(into.has(x.customerId))x.customerId=into.get(x.customerId);});
+   }}
   // Merge-resurrection guard: a draft the owner already ✕'d must stay dead even when a stale
   // device re-queues its own fresh copy (new id, new t — record stamps can't catch that).
   // Not tombstoned: messages carry no createdAt, so an id tomb would kill unrelated reused ids;
@@ -5044,6 +5081,12 @@ function remapRefs(coll,rec,reidMaps){
     out=Object.assign({},out,{userId:um[rec.userId]});
   return out;
 }
+function twinKey(coll,x){ // identity of ONE record across ids: its birth ms + what it is
+  if(!x||!Number.isFinite(x.createdAt))return "";
+  if(coll==="customers")return x.createdAt+"|"+String(x.name||"").trim().toLowerCase()+"|"+String(x.phone||"").replace(/\D/g,"");
+  if(coll==="jobs")return x.createdAt+"|"+x.customerId+"|"+x.service+"|"+x.date+"|"+(x.time||"")+"|"+(+x.price||0);
+  return "";
+}
 function mergeDb(local,remote){
   local=local||{};remote=remote||{};
   const localNewer=(local.updatedAt||0)>=(remote.updatedAt||0);
@@ -5069,6 +5112,14 @@ function mergeDb(local,remote){
     const lList=(local[coll]||[]).map(r=>remapRefs(coll,r,reidMaps));
     const rList=remote[coll]||[];
     const lMap=new Map(lList.map(r=>[r.id,r])),rMap=new Map(rList.map(r=>[r.id,r]));
+    // Same record, different id (2026-09-17): a phone holding copies from BEFORE another device
+    // re-id'd them sent them back as brand-new records. A local record whose twin (same birth ms +
+    // same identity) sits in the remote under another id IS that record: map to it, never clone.
+    // Keys shared by several remote records (one import batch) are ambiguous and never used.
+    const rTwin=new Map();
+    rList.forEach(x=>{const k=twinKey(coll,x);if(k)rTwin.set(k,rTwin.has(k)?null:x.id);});
+    const twinOf=l=>{const tw=rTwin.get(twinKey(coll,l));return tw!=null&&tw!==l.id&&!lMap.has(tw)?tw:null;};
+    const adopt=new Map(); // remote twin id → the local copy (its edits win if newer)
     const ids=new Set([...lList.map(r=>r.id),...rList.map(r=>r.id)]);
     let nextId=Math.max(0,...lList.map(r=>+r.id||0),...rList.map(r=>+r.id||0),
       (+local[SEQ_OF[coll]]||0)-1,(+remote[SEQ_OF[coll]]||0)-1)+1;
@@ -5078,6 +5129,8 @@ function mergeDb(local,remote){
       if(l&&r){
         if(JSON.stringify(l)===JSON.stringify(r)){result.push(l);return;}
         const bothCreated=Number.isFinite(l.createdAt)&&Number.isFinite(r.createdAt);
+        const tw=bothCreated&&Math.abs(l.createdAt-r.createdAt)>5000?twinOf(l):null;
+        if(tw!=null){reidMap[id]=tw;adopt.set(tw,l);result.push(r);return;} // local is remote #tw, not a new record
         if(bothCreated&&Math.abs(l.createdAt-r.createdAt)>5000){
           // two different records that raced onto the same counter — keep both, re-id the local one
           const newId=nextId++;
@@ -5090,7 +5143,9 @@ function mergeDb(local,remote){
         }
         return;
       }
-      const rec=l||r;
+      if(l&&!r){const tw=twinOf(l);if(tw!=null){reidMap[id]=tw;adopt.set(tw,l);return;}} // local copy of remote #tw
+      let rec=l||r;
+      if(!l&&adopt.has(id)){const a=adopt.get(id);if((+a.up||0)>(+r.up||0))rec=Object.assign({},a,{id});} // newer edits ride along
       if(TOMB_COLLS.includes(coll)&&isTomb(coll,id,rec.createdAt))return; // deleted after it was born — drop
       result.push(rec);
     });
