@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Reps → 30%</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px;max-width:640px;margin:0 auto}
+pre{background:#15161c;padding:14px;border-radius:10px;white-space:pre-wrap}</style></head><body>
+<h2>Sales commission → 30% (from today)</h2>
+<pre id="log"></pre>
+<script>
+"use strict";
+/* One-time: sets every ACTIVE sales rep's rate to 30%. Jobs already booked keep the rate stamped
+   when they were booked, so this only affects work booked from now on. Nothing else is touched. */
+const FILE="flyra-db.json",RATE=30;
+const log=m=>{const el=document.getElementById("log");el.textContent=el.textContent+m+String.fromCharCode(10);};
+(async function(){
+try{
+  const tok=localStorage.getItem("flyra.synckey");
+  if(!tok){log("No sync token in this browser profile — open this page in the Chrome profile that runs the CRM.");return;}
+  const H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+  let gid=localStorage.getItem("flyra.syncgist");
+  if(!gid){const list=await (await fetch("https://api.github.com/gists?per_page=100",{headers:H})).json();
+    const hit=(Array.isArray(list)?list:[]).find(g=>g.files&&g.files[FILE]);gid=hit&&hit.id;}
+  if(!gid){log("Couldn't find the CRM's cloud copy — aborting, nothing changed.");return;}
+  const g=await (await fetch("https://api.github.com/gists/"+gid,{headers:H})).json();
+  const f=g.files[FILE];
+  const db=JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+  const reps=(db.users||[]).filter(u=>u.role==="sales"&&u.active!==false);
+  if(!reps.length){log("No active sales reps found — aborting.");return;}
+  const now=Date.now();let changed=0;
+  reps.forEach(u=>{
+    const was=+u.commissionPct||0;
+    if(was===RATE){log(u.name+" is already "+RATE+"% — left alone.");return;}
+    u.commissionPct=RATE;u.up=now;changed++;
+    log(u.name+": "+was+"% → "+RATE+"%");
+  });
+  if(!changed){log("Nothing to change.");return;}
+  db.updatedAt=now;
+  const res=await fetch("https://api.github.com/gists/"+gid,{method:"PATCH",headers:H,
+    body:JSON.stringify({files:{[FILE]:{content:JSON.stringify(db)}}})});
+  log(res.ok?"Pushed to cloud OK":"Cloud push FAILED ("+res.status+")");
+  if(res.ok){
+    log("Applies to jobs booked from now on — jobs already booked keep the rate they were booked at.");
+    log("A day with 4+ collected sales still pays 50% on all of that day's closes.");
+    log("Change it any time in the CRM: Settings ▸ Crew commission.");
+  }
+}catch(e){log("ERROR: "+e.message);}
+})();
+</script></body></html>
