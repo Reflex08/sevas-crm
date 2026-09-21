@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Recheck bonus days (5 sales)</title>
+<style>body{font-family:system-ui;background:#0b0c10;color:#eee;padding:40px;max-width:760px;margin:0 auto}
+pre{background:#15161c;padding:14px;border-radius:10px;white-space:pre-wrap;font-size:13px}</style></head><body>
+<h2>Recheck every unpaid bonus day against 5 collected sales</h2>
+<pre id="log"></pre>
+<script>
+"use strict";
+/* One-time (owner 2026-09-20: "now it's 5+ sales for 50%, not 4" — applied to everything unpaid).
+   A booking day that never reached 5 COLLECTED sales goes back to the rep's ordinary rate: 25% for
+   work booked before today's raise, the rep's current rate for anything booked since. Money already
+   handed over is never clawed back — settlements keep what they paid; only the unpaid difference goes. */
+const FILE="flyra-db.json",BAR=5,ERA="2026-08-19",RAISE_DAY="2026-09-20",OLD_RATE=25;
+const log=m=>{const el=document.getElementById("log");el.textContent=el.textContent+m+String.fromCharCode(10);};
+const iso=t=>{const d=new Date(t);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+(async function(){
+try{
+  const tok=localStorage.getItem("flyra.synckey");
+  if(!tok){log("No sync token in this browser profile — open this page in the Chrome profile that runs the CRM.");return;}
+  const H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+  let gid=localStorage.getItem("flyra.syncgist");
+  if(!gid){const list=await (await fetch("https://api.github.com/gists?per_page=100",{headers:H})).json();
+    const hit=(Array.isArray(list)?list:[]).find(g=>g.files&&g.files[FILE]);gid=hit&&hit.id;}
+  if(!gid){log("Couldn't find the CRM's cloud copy — aborting.");return;}
+  const g=await (await fetch("https://api.github.com/gists/"+gid,{headers:H})).json();
+  const f=g.files[FILE];
+  const db=JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+  const cn=id=>{const c=db.customers.find(x=>x.id===id);return c?c.name:"?"+id;};
+  const paid=j=>j.status==="done"&&(+j.collected||0)>=(+j.price||0);
+  const groups={};
+  db.jobs.forEach(j=>{
+    if(!j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled"||!(+j.createdAt))return;
+    const u=db.users.find(x=>x.id===j.closerId);if(!u||u.role!=="sales")return;
+    const day=iso(+j.createdAt);if(day<ERA)return;
+    (groups[j.closerId+"|"+day]=groups[j.closerId+"|"+day]||[]).push(j);
+  });
+  const now=Date.now();let changed=0;
+  Object.keys(groups).sort((a,b)=>a.split("|")[1]<b.split("|")[1]?-1:1).forEach(k=>{
+    const [uid,day]=k.split("|"),list=groups[k];
+    const u=db.users.find(x=>x.id===+uid);
+    const collected=list.filter(paid).length;
+    const at50=list.filter(j=>+j.commissionPct===50);
+    if(collected>=BAR||!at50.length)return;
+    const rate=day>=RAISE_DAY?(+u.commissionPct||OLD_RATE):OLD_RATE;
+    log(u.name+" · closed "+day+": "+list.length+" closes, "+collected+" collected → under "+BAR+", back to "+rate+"%");
+    at50.forEach(j=>{
+      const wasAmt=(+j.price||0)*0.5,nowAmt=(+j.price||0)*rate/100;
+      const settled=!!(j.settledBy&&j.settledBy[uid]);
+      j.commissionPct=rate;j.up=now;changed++;
+      log("    "+j.date+"  "+cn(j.customerId)+" $"+j.price+"  $"+wasAmt.toFixed(2)+" → $"+nowAmt.toFixed(2)+(settled?"   (already paid out — nothing clawed back)":""));
+    });
+  });
+  if(!changed){log("Every unpaid day already matches the 5-sale rule — nothing to change.");return;}
+  db.updatedAt=now;
+  const res=await fetch("https://api.github.com/gists/"+gid,{method:"PATCH",headers:H,
+    body:JSON.stringify({files:{[FILE]:{content:JSON.stringify(db)}}})});
+  log("");log(res.ok?"Pushed to cloud OK — "+changed+" job(s) re-rated.":"Cloud push FAILED ("+res.status+")");
+  if(res.ok)log("Reopen the CRM on every phone so they pick up the 5-sale rule.");
+}catch(e){log("ERROR: "+e.message);}
+})();
+</script></body></html>

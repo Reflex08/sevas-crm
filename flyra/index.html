@@ -895,7 +895,7 @@ function newDb(){
    were paid out that way. So the rule is now bump-UP-only everywhere, over every booking day since
    BONUS_ERA_START (a late 4th collection still unlocks the day). Taking a bonus back happens only
    on the device where a human undid or deleted a job (downKeys). */
-const DAILY_BONUS_AT=4,DAILY_BONUS_PCT=50; // owner 2026-08-21: "now it's 4 sales to 50%, not 5"
+const DAILY_BONUS_AT=5,DAILY_BONUS_PCT=50; // owner 2026-09-20: back to 5 collected sales in a day (was 4 since 2026-08-26)
 function closedDay(j){return (+j.createdAt||0)?localISO(new Date(+j.createdAt)):"";}
 function repClosesOn(data,uid,dayISO){
   return data.jobs.filter(j=>j.closerId===uid&&!(Array.isArray(j.splits)&&j.splits.length)&&
