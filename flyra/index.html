@@ -902,31 +902,35 @@ function repClosesOn(data,uid,dayISO){
     j.status!=="cancelled"&&closedDay(j)===dayISO);
 }
 const BONUS_ERA_START="2026-08-19"; // earlier booking days are frozen history (import-day batch, the old 5-close bar)
-function bonusKey(j){return j&&j.closerId?j.closerId+"|"+closedDay(j):"";}
-function applyDailyBonus(data,downKeys){
-  const groups={}; // "uid|day" → jobs
-  data.jobs.forEach(j=>{
-    if(!j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled")return;
-    const day=closedDay(j);
-    if(!day||day<BONUS_ERA_START)return;
-    const u=(data.users||[]).find(x=>x.id===j.closerId);
-    if(!u||u.role!=="sales")return;
-    (groups[j.closerId+"|"+day]=groups[j.closerId+"|"+day]||[]).push(j);
-  });
+/* 2026-09-21: the 50% is decided at READ time (bonusDay → jobCredits) and never stored. A phone
+   still running an older rule (the 4-sale bar) kept writing "50%" onto jobs and every other phone
+   kept it — Sep 4 and Sep 15 went back to 50% the day after the owner moved the bar to 5. Now a
+   stored 50 on a bonus-era day is just a stale stamp: it's reset to the rate the job was booked at,
+   and every screen and payroll ask bonusDay() — no device's copy of the rule can change what anyone
+   is owed. Booking days before BONUS_ERA_START stay exactly as they were paid. */
+const RATE_RAISE_DAY="2026-09-20",RATE_BEFORE_RAISE=25; // reps 25% → 30% for work booked from this day
+/* The rate a close was BOOKED at. A stored 50 on a bonus-era day is a stale bonus stamp, not a rate. */
+function bookedPct(j,data){
+  const p=+j.commissionPct||0;
+  if(p!==DAILY_BONUS_PCT||!j.closerId||(Array.isArray(j.splits)&&j.splits.length))return p;
+  const day=closedDay(j);if(!day||day<BONUS_ERA_START)return p; // paid-out history stays as it was
+  const u=((data||db).users||[]).find(x=>x.id===j.closerId);if(!u||u.role!=="sales")return p;
+  if(day<RATE_RAISE_DAY)return RATE_BEFORE_RAISE;
+  const r=+u.commissionPct||0;return r&&r!==DAILY_BONUS_PCT?r:RATE_BEFORE_RAISE;
+}
+function applyDailyBonus(data){ // strips stale bonus stamps from the stored data; name kept — save()/normalize() call it
   let changed=false;
-  Object.entries(groups).forEach(([key,jobs])=>{
-    const uid=+key.split("|")[0];
-    const base=+(((data.users||[]).find(x=>x.id===uid)||{}).commissionPct)||0;
-    // owner 2026-08-26: the bar is COLLECTED sales — "three today at 50% aren't really 50% unless
-    // I collect that fourth sale first". Booked-but-unpaid closes don't count toward the 4.
-    if(jobs.filter(jobPaid).length>=DAILY_BONUS_AT)
-      jobs.forEach(j=>{if(+j.commissionPct!==DAILY_BONUS_PCT){j.commissionPct=DAILY_BONUS_PCT;changed=true;}});
-    else if(downKeys&&downKeys.has(key)) // under the bar: take back only OUR bonus stamp — a hand-set special rate is never touched
-      jobs.forEach(j=>{if(+j.commissionPct===DAILY_BONUS_PCT&&base!==DAILY_BONUS_PCT){j.commissionPct=base;changed=true;}});
-  });
+  (data.jobs||[]).forEach(j=>{const b=bookedPct(j,data);if(b!==(+j.commissionPct||0)){j.commissionPct=b;changed=true;}});
   return changed;
 }
-
+/* This job's booking day earned the bonus: DAILY_BONUS_AT+ of that day's closes are COLLECTED. */
+function bonusDay(j,data){
+  data=data||db;
+  if(!j||!j.closerId||(Array.isArray(j.splits)&&j.splits.length)||j.status==="cancelled")return false;
+  const day=closedDay(j);if(!day||day<BONUS_ERA_START)return false;
+  const u=(data.users||[]).find(x=>x.id===j.closerId);if(!u||u.role!=="sales")return false;
+  return repClosesOn(data,j.closerId,day).filter(jobPaid).length>=DAILY_BONUS_AT;
+}
 function normalize(r){
   r=r||{};
   r.v=1;
@@ -1009,7 +1013,7 @@ function normalize(r){
    (r.payouts||[]).forEach(p=>{if((+p.t||0)<SETTLE_EPOCH)lastPay[p.userId]=Math.max(lastPay[p.userId]||0,+p.t||0);});
    (r.jobs||[]).forEach(j=>{
      if(j.status!=="done"||!jobPaid(j))return;
-     jobCredits(j).forEach(cr=>{
+     jobCredits(j,r).forEach(cr=>{
        const t0=lastPay[cr.userId];
        if(!t0||!(+j.completedAt)||(+j.completedAt)>t0)return;
        j.settledBy=j.settledBy||{};
@@ -1079,7 +1083,7 @@ function normalize(r){
   // their current amount — only rate rises AFTER this build surface as top-ups
   r.jobs.forEach(j=>{if(!j.settledBy||typeof j.settledBy!=="object")return;
     j.settledAmt=(j.settledAmt&&typeof j.settledAmt==="object")?j.settledAmt:{};
-    Object.keys(j.settledBy).forEach(uid=>{if(j.settledAmt[uid]==null){const cr=jobCredits(j).find(c=>String(c.userId)===String(uid));j.settledAmt[uid]=cr?cr.amount:0;}});});
+    Object.keys(j.settledBy).forEach(uid=>{if(j.settledAmt[uid]==null){const cr=jobCredits(j,r).find(c=>String(c.userId)===String(uid));j.settledAmt[uid]=cr?cr.amount:0;}});});
   // Demo seed must never live alongside real clients (owner 2026-08-21: "stop making up fake
   // customers whenever we do an update") — a fresh device seeds Maya & co, then a merge into the
   // company cloud drags them in. Fingerprint = exact seed name+phone (555 numbers are fictional
@@ -1275,7 +1279,7 @@ function jobCloserId(j){ // who gets credit for this job at all: its own closer,
 /* Split commission (Change A): a job with a non-empty j.splits array is credited ONLY through that
    array — closerId/commissionPct are ignored on that job. Otherwise the single-closer rule applies
    (explicit closerId+commissionPct stamp only — no ownerId fallback, that inflated imported books). */
-function jobCredits(j){
+function jobCredits(j,data){ // data: the db being normalized (load runs before `db` exists)
   const price=+j.price||0;
   const out=[];
   if(Array.isArray(j.splits)&&j.splits.length)
@@ -1283,8 +1287,10 @@ function jobCredits(j){
       amount:price*(+s.pct||0)/100,salesShare:price/j.splits.length})));
   // A stamped closer at 0% (the owner's own closes) still gets the SALE credit — only the
   // commission amount is zero. Requiring pct>0 here would wipe the owner off the leaderboard.
-  else if(j.closerId)
-    out.push({userId:j.closerId,pct:+j.commissionPct||0,amount:price*(+j.commissionPct||0)/100,salesShare:price});
+  else if(j.closerId){
+    const pct=bonusDay(j,data)?DAILY_BONUS_PCT:bookedPct(j,data); // the day's bonus, decided now — a stale stamp never pays
+    out.push({userId:j.closerId,pct,amount:price*pct/100,salesShare:price});
+  }
   // Cleaning pay (owner order 2026-08-20): closing and CLEANING are separate credits — the tech
   // who worked the job earns his own rate on top, with no sale credit (it wasn't his close).
   if(j.cleanerId&&(+j.cleanerPct||0)>0)
@@ -2291,12 +2297,7 @@ function createJob(data){
   save();return j; // save() re-runs the daily bonus math
 }
 function updateJob(id,data){const j=db.jobs.find(x=>x.id===id);if(!j)return null;Object.assign(j,data);save();return j;}
-function deleteJob(id){
-  const key=bonusKey(db.jobs.find(x=>x.id===id));
-  tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);
-  if(key)applyDailyBonus(db,new Set([key])); // this device's human removed a close — the day may drop under the bar
-  save();
-}
+function deleteJob(id){tomb("jobs",id);db.jobs=db.jobs.filter(x=>x.id!==id);save();} // the bonus is read-time — nothing to take back
 /* Done flow — three-way (owner's bug report: Cancel used to still mark it done, which read as
    "collected"): OK = done + paid · Cancel then OK = done, NOT paid yet · Cancel twice = abort,
    the job stays booked and nothing changes. */
@@ -2322,7 +2323,6 @@ function uncompleteJob(id){
   const had=+j.collected||0;
   j.status="scheduled";j.completedAt=0;j.collected=0;j.payMethod="";
   j.cleanerId=null;j.cleanerPct=0; // an accidental Done never leaves cleaning pay behind
-  if(bonusKey(j))applyDailyBonus(db,new Set([bonusKey(j)])); // un-collected here — the day may drop under the bar
   const c=custById(j.customerId);
   if(c){c.log=c.log||[];c.log.push({t:Date.now(),m:"Back to scheduled — Done undone"+(had?" (had $"+had.toFixed(2)+" collected, now cleared)":"")});}
   save();return j;
