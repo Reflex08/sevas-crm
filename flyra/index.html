@@ -1892,7 +1892,7 @@ const GTA_VIEWBOX="-79.95,44.15,-78.85,43.45"; // Mississauga/Brampton → Picke
      spelling with the SAME house number (Photon fuzzy: "Mathew Dr" → Matthew Dr, Vaughan);
    - unverified → Waze text search, told the street's real town when the map knows it, and never the
      pre-filled "Toronto" for a street the map can't find in Toronto; Google Maps offered as backup. */
-const GEO_V=2;
+const GEO_V=3; // 3: a house near the territory is pinned even where the street name repeats (2026-09-28)
 const WORK_AREA=[43.75,-79.45]; // fallback centre of the territory (North York) until enough houses are pinned
 const geoBusy=new Set();
 const SUFFIX={cr:"Crescent",cres:"Crescent",crecent:"Crescent",cresent:"Crescent",crescant:"Crescent",crescent:"Crescent",
@@ -1942,6 +1942,7 @@ function workArea(){ // median of the houses already pinned — the crew's real 
 /* PURE decision, so the gate proves it offline. cands = same number + same road, anywhere;
    roadTowns = every MUNICIPALITY where a road of that name exists (null = not looked up) — Toronto's
    borough tags vary segment by segment, so coverage is judged per city; labels still name the borough. */
+const NEAR_KM=25; // inside the territory: a found house is the house, even where the street name repeats
 function decideGeo(key,cands,roadTowns,work){
   const P=r=>({lat:+(+r.lat).toFixed(6),lng:+(+r.lon).toFixed(6),label:geoLabel(r),
     km:Math.round(distKm(work[0],work[1],+r.lat,+r.lon)*10)/10,town:geoMuni(r.address)});
@@ -1950,7 +1951,10 @@ function decideGeo(key,cands,roadTowns,work){
   const covered=new Set(found.map(f=>f.town));
   const holes=(roadTowns||[]).filter(t=>t&&!covered.has(t)); // the street is there, its house isn't mapped
   const out={key,v:GEO_V,t:Date.now()};
-  if(found.length&&!holes.length){
+  // A hole only matters when the house we DID find is out of the territory (28 Prince Charles: only
+  // Georgetown's is mapped, 38 km away). Six Burbank Drive clients sat unverified — and Waze got the
+  // street with no number — purely because Burbank also runs through another town (2026-09-28).
+  if(found.length&&(!holes.length||found[0].km<=NEAR_KM)){
     Object.assign(out,{lat:found[0].lat,lng:found[0].lng,label:found[0].label});
     if(found.length>1)out.alts=found.slice(1,3);
     return out;
@@ -3135,6 +3139,7 @@ function openCustProfile(id){
     sec("Plan")+
     (plans.length?plans.map(p=>'<div class="note" style="margin-bottom:8px"><b>'+esc(p.name)+'</b> — '+
       esc(money(p.perVisit))+' × '+(+p.visitsPerYear||0)+'/yr · '+esc(p.status)+
+      (p.status==="proposed"?(p.sentAt?' · link sent '+esc(fmtDateShort(localISO(new Date(p.sentAt)))):' · not sent yet'):'')+
       '<div style="margin-top:9px"><button class="btn sm" data-cpplan="'+p.id+'">View plan</button></div></div>').join("")
       :'<div class="note">No plan yet.</div>')+
     sec("Jobs",jobs.length)+
@@ -3371,7 +3376,7 @@ function planRow(p){
   return '<div class="jobline" data-plan="'+p.id+'">'+
     '<div style="flex:1;min-width:0">'+
       '<div class="nm">'+esc(c?c.name:"(deleted customer)")+' <span class="sub" style="font-weight:600">'+esc(p.name)+'</span></div>'+
-      '<div class="sub">'+(+p.visitsPerYear||0)+' visits/yr · '+esc(planMonthLabel(p))+'</div>'+
+      '<div class="sub">'+(+p.visitsPerYear||0)+' visits/yr · '+esc(planMonthLabel(p))+(p.status==="proposed"&&p.sentAt?' · 📩 sent '+esc(fmtDateShort(localISO(new Date(p.sentAt)))):'')+'</div>'+
     '</div>'+
     '<div style="text-align:right;flex-shrink:0">'+
       '<div class="money">'+esc(money2(p.perVisit))+' <span class="sub" style="font-weight:600">/visit</span></div>'+
@@ -3479,13 +3484,27 @@ function openPlanEdit(id){
     document.querySelectorAll("[data-pvp]").forEach(x=>x.classList.toggle("active",+x.dataset.pvp===n));
     paintPlanMonths();paintPlanHint();
   });
+  // typing "2" left the 4 months the form had pre-picked, Save refused with a toast the owner could
+  // miss, and no plan was ever created (owner 2026-09-28: "not registered as proposed") — the months
+  // now follow the number of visits, exactly as the 2/4/6/12 buttons do.
   $("#pe-visits").oninput=paintPlanHint;
+  $("#pe-visits").onchange=()=>{
+    const n=Math.max(1,Math.min(12,+$("#pe-visits").value||0));
+    if(!n||n===planEditMonths.length)return paintPlanHint();
+    const startMonth=new Date(($("#pe-first").value||defFirst)+"T12:00:00").getMonth()+1;
+    planEditMonths=suggestMonths(startMonth,n);
+    document.querySelectorAll("[data-pvp]").forEach(x=>x.classList.toggle("active",+x.dataset.pvp===n));
+    paintPlanMonths();paintPlanHint();
+  };
   $("#pe-cancel").onclick=()=>{if(p)openPlan(p.id);else closeModal("plan-overlay");};
   $("#pe-save").onclick=()=>{
     const cid=+$("#pe-cust").value||null;
     if(!cid){toast("Pick a customer for this plan","err");return;}
     const visits=+$("#pe-visits").value||0;
-    if(!visits||planEditMonths.length!==visits){
+    if(!visits||planEditMonths.length!==visits){ // say it where the eye is, not only in a toast
+      const box=$("#pe-months"),hint=$("#pe-hint");
+      if(box&&box.classList){box.classList.remove("shake");if(box.offsetWidth!==undefined)void box.offsetWidth;box.classList.add("shake");}
+      if(hint){hint.textContent="Tap "+visits+" service month"+(visits!==1?"s":"")+" below — "+planEditMonths.length+" selected";hint.style.color="var(--red)";}
       toast("Pick "+visits+" service month"+(visits!==1?"s":"")+" — got "+planEditMonths.length,"err");return;
     }
     const data={customerId:cid,
@@ -3526,6 +3545,7 @@ function planLink(id){
 function sendPlanLink(id){
   const link=planLink(id);if(!link)return;
   const p=db.plans.find(x=>x.id===id),c=p?custById(p.customerId):null;
+  if(p){p.sentAt=Date.now();save();if(c){c.log=c.log||[];c.log.push({t:p.sentAt,m:"📩 Sent the "+p.name+" plan to accept"});}save();}
   const ph=c?cleanNum(c.phone):"";
   const pn=((p&&p.name)||"service").replace(/\s+plan$/i,""); // "Window Cleaning plan" → never "…plan plan"
   const body="Hi "+(c?firstName(c.name):"")+", here's your "+pn+" plan with "+
@@ -3535,7 +3555,8 @@ function sendPlanLink(id){
 }
 function planFoot(p){
   if(p.status==="proposed")
-    return '<button class="btn btn-primary" id="pv-sendlink" style="width:100%;justify-content:center;padding:14px;font-size:15px">📩 Send accept link</button>'+
+    return (p.sentAt?'<div class="sub" style="width:100%;text-align:center;margin-bottom:8px">📩 Accept link sent '+esc(fmtWhen(p.sentAt))+' — waiting on them</div>':'')+
+      '<button class="btn btn-primary" id="pv-sendlink" style="width:100%;justify-content:center;padding:14px;font-size:15px">📩 '+(p.sentAt?"Send it again":"Send accept link")+'</button>'+
       '<button class="btn btn-ghost" id="pv-accept" style="width:100%;justify-content:center;margin-top:10px">Accept &amp; Sign in person</button>';
   if(p.status==="active"){
     const sig=(p.signature||p.signedName)?'<div style="text-align:center;width:100%">'+
@@ -3557,7 +3578,7 @@ function openPlan(id){
     return '<div class="qm'+(show?" qm-hit":"")+'">'+(show?'<span class="vis">'+label+'</span>':"")+MON_SHORT[t.m]+'<small>'+t.y+'</small></div>';
   }).join("");
   $("#plan-title").textContent="Plan";
-  $("#plan-hsub").textContent=(c?esc(c.name):"(deleted customer)")+" · "+esc(p.status);
+  $("#plan-hsub").textContent=(c?c.name:"(deleted customer)")+" · "+p.status+(p.status==="proposed"&&p.sentAt?" · link sent":"");
   $("#plan-body").innerHTML=
     '<div style="text-align:center">'+
       '<div style="font-size:36px;font-weight:800">'+esc(money2(p.perVisit))+'</div>'+
@@ -3579,7 +3600,7 @@ function openPlan(id){
     '</div>';
   $("#plan-foot").innerHTML=planFoot(p);
   const acc=$("#pv-accept");if(acc)acc.onclick=()=>planSignPad(id);
-  const sl=$("#pv-sendlink");if(sl)sl.onclick=()=>sendPlanLink(id); // client accepts from their phone
+  const sl=$("#pv-sendlink");if(sl)sl.onclick=()=>{sendPlanLink(id);openPlan(id);}; // client accepts from their phone; the sheet then shows it went out
   const can=$("#pv-cancel");if(can)can.onclick=()=>{
     if(!confirm("Cancel this plan? Future auto-booked visits will stop."))return;
     cancelPlan(id);render();openPlan(id);toast("Plan cancelled","ok");
@@ -4883,7 +4904,13 @@ function bizCard(){
     '<div class="grid2">'+
       '<div class="field"><label>Phone</label><input id="set-bphone" value="'+esc(b.phone||"")+'"></div>'+
       '<div class="field"><label>Email</label><input id="set-bemail" type="email" value="'+esc(b.email||"")+'"></div>'+
-    '</div></div></div>';
+    '</div>'+
+    // the post-job thank-you asks for a review ONLY when there's a link to send them to; the input
+    // that set it left the app with the old automation card, so it sat empty (owner 2026-09-28)
+    '<div class="field" style="margin-bottom:0"><label>Review link — used in the post-job thank-you</label>'+
+      '<input id="set-reviewlink" type="url" value="'+esc((db.settings.automation||{}).reviewLink||"")+'" placeholder="Paste your Google review link"></div>'+
+    '<div class="hint">'+((db.settings.automation||{}).reviewLink?'Every thank-you asks for a review.':'⚠ Empty — thank-you texts go out without the review ask.')+'</div>'+
+    '</div></div>';
 }
 function servicesCard(){
   const list=db.settings.services;
@@ -5033,6 +5060,15 @@ function bindSettingsEvents(){
     if(delService(+b.dataset.svcdel))renderSettings();});
   const sa=$("#svc-add");if(sa)sa.onclick=()=>{addService();renderSettings();};
   const g=$("#set-goal");if(g)g.onchange=()=>{db.settings.goal=Math.max(0,+g.value||0);save();toast("Saved","ok");};
+  const rl=$("#set-reviewlink");if(rl)rl.onchange=()=>{
+    const v=(rl.value||"").trim();
+    db.settings.automation.reviewLink=v;
+    // drafts already waiting were written without the ask — rewrite them so they go out complete
+    let fixed=0;
+    db.messages.forEach(m=>{if(m.kind!=="thanks"||m.status!=="queued")return;
+      const c=custById(m.customerId);if(!c)return;m.body=blastBody(thanksTemplate(),c);fixed++;});
+    save();renderSettings();
+    toast(v?("Review link saved"+(fixed?" — "+fixed+" waiting thank-you"+(fixed===1?"":"s")+" updated":"")):"Review link cleared","ok");};
   const fr=$("#set-fbrep");if(fr)fr.onchange=()=>{db.settings.fbLeadRep=+fr.value||0;save();toast("Facebook leads → "+(userById(+fr.value)||{}).name,"ok");};
   const fp=$("#set-feepct");if(fp)fp.onchange=()=>{
     db.settings.terms.cancelFeePct=Math.max(0,Math.min(100,+fp.value||0));save();toast("Saved","ok");};
